@@ -4,6 +4,7 @@
 package pipeline
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -23,7 +24,7 @@ import (
 	"github.com/killabayte/shogun/internal/run"
 )
 
-// Stages in order. P4 stops before integration.
+// Stages in order; publish (integrate.go) follows integration.
 const (
 	StageResearch    = "research"
 	StageOutline     = "outline"
@@ -45,8 +46,11 @@ type Engine struct {
 	Reviewer provider.Runner
 	Asker    Asker // nil = --auto or no terminal
 	Fetch    Fetcher
-	Log      io.Writer
-	Now      func() time.Time
+	// Project names the plan's library folder and frontmatter; CLIVersions go into the receipt.
+	Project     string
+	CLIVersions map[string]string
+	Log         io.Writer
+	Now         func() time.Time
 }
 
 // Outcome is where the run stopped.
@@ -69,15 +73,27 @@ func (e *Engine) Execute(ctx context.Context) Outcome {
 	if e.State.Cursor.Stage == "" || e.State.Cursor.Stage == "intake" {
 		e.State.Cursor = run.Cursor{Stage: StageResearch}
 	}
+	if e.State.Status == run.StatusApproved && e.State.Publish.Done {
+		return Outcome{Status: run.StatusApproved, Reason: "published " + e.State.Publish.Path}
+	}
 	if missing := UnavailableInputs(e.Manifest); len(missing) > 0 {
 		return *e.stop(run.StatusNeedsInput, MissingInputsReason(missing))
 	}
+	if err := e.checkSnapshots(); err != nil {
+		return *e.stop(run.StatusFailed, err.Error())
+	}
 	e.State.Status, e.State.Reason = run.StatusRunning, ""
 	for {
-		if e.State.Cursor.Stage == StageIntegration {
-			return *e.stop(run.StatusPaused, "not_implemented: integration and publication arrive in P5 (every step accepted)")
+		var o *Outcome
+		switch e.State.Cursor.Stage {
+		case StageIntegration:
+			o = e.integrate(ctx)
+		case StagePublish:
+			o = e.publish(ctx)
+		default:
+			o = e.unit(ctx)
 		}
-		if o := e.unit(ctx); o != nil {
+		if o != nil {
 			return *o
 		}
 	}
@@ -383,6 +399,9 @@ func (e *Engine) gate(stage string, d *stageDoc, rev *schema.Review) []string {
 // re-cutting a batch never leaves its unresolved findings behind. A finding aimed at one specific
 // step of that earlier batch gates only that step.
 func relevant(p *run.Progress, key string) []run.Finding {
+	if key == StageIntegration { // the final gate reconciles the whole ledger
+		return openFindings(p)
+	}
 	targets := map[string]bool{key: true}
 	mine := batchSteps(key)
 	for id := range mine {
@@ -508,11 +527,6 @@ func (e *Engine) call(ctx context.Context, role, stage, prompt string, kind sche
 	if err != nil {
 		return nil, e.fail("schema", err)
 	}
-	id := fmt.Sprintf("%04d-%s-%s", st.Counters.LogicalCalls+1, stage, role)
-	dir := filepath.Join(e.Run.Dir, "calls", id)
-	if err := e.Run.WriteArtifact(filepath.Join("calls", id, "prompt.md"), []byte(prompt)); err != nil {
-		return nil, e.fail("write prompt", err)
-	}
 	roots := []string{}
 	for _, r := range e.Manifest.Repos {
 		roots = append(roots, r.Root)
@@ -530,20 +544,50 @@ func (e *Engine) call(ctx context.Context, role, stage, prompt string, kind sche
 			deadline, budgetBound = e.Now().Add(left), true
 		}
 	}
+	id := fmt.Sprintf("%04d-%s-%s", st.Counters.LogicalCalls+1, stage, role)
+	// The recovery key binds a result to this request, this generation and these inputs (§9).
+	reqDigest := digest([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%v\x00%s\x00gen=%d\x00inputs=%s", spec.Model, spec.Effort,
+		digest([]byte(prompt)), digest(bundle), web, strings.Join(roots, "\x00"), st.Generation, e.Manifest.Fingerprint)))
+	// §9 crash recovery: a finished result of this very request (a crash after the result but
+	// before the checkpoint) is accepted once, from the base directory or any retry suffix; any
+	// other leftover directory gets a fresh id.
+	base := id
+	for n := 1; exists(filepath.Join(e.Run.Dir, "calls", id)); n++ {
+		if res, ok := reuseResult(filepath.Join(e.Run.Dir, "calls", id), reqDigest); ok {
+			st.Counters.LogicalCalls++
+			st.Counters.Attempts += res.Attempts
+			st.Counters.ActiveSeconds += res.ActiveSeconds
+			e.logf("[%s] %s call %s: finished result recovered after a crash, not called again", e.unitKey(), role, id)
+			e.noteReported(role, res)
+			return res, nil
+		}
+		id = fmt.Sprintf("%s-%d", base, n+1)
+	}
+	dir := filepath.Join(e.Run.Dir, "calls", id)
+	if err := e.Run.WriteArtifact(filepath.Join("calls", id, "prompt.md"), []byte(prompt)); err != nil {
+		return nil, e.fail("write prompt", err)
+	}
+	if err := writeJSON(filepath.Join(dir, "request.json"), map[string]any{"digest": reqDigest, "role": role, "unit": e.unitKey(),
+		"model": spec.Model, "effort": spec.Effort, "web": web, "roots": roots}); err != nil {
+		return nil, e.fail("write request", err)
+	}
 	req := provider.Request{Dir: dir, Model: spec.Model, Effort: string(spec.Effort), Prompt: prompt, Schema: bundle,
 		Roots: roots, Web: web, Deadline: deadline, MaxAttempts: attempts}
 	e.logf("[%s] %s call %s (%s)…", e.unitKey(), role, id, spec)
 	start := time.Now()
 	res, err := runner.Run(ctx, req)
+	spent := time.Since(start).Seconds()
 	st.Counters.LogicalCalls++
-	st.Counters.ActiveSeconds += time.Since(start).Seconds()
+	st.Counters.ActiveSeconds += spent
 	var perr *provider.Error
 	if err != nil && !errors.As(err, &perr) {
 		perr = &provider.Error{Class: provider.ClassConfig, Msg: err.Error()}
 	}
 	if res != nil {
 		st.Counters.Attempts += res.Attempts
+		res.ActiveSeconds = spent // durable, so a recovered result restores the measured spend
 		_ = writeJSON(filepath.Join(dir, "result.json"), res)
+		e.noteReported(role, res)
 		return res, nil
 	}
 	st.Counters.Attempts += perr.Attempts
@@ -563,6 +607,30 @@ func (e *Engine) call(ctx context.Context, role, stage, prompt string, kind sche
 	}
 	return nil, e.stop(run.StatusFailed, reason)
 }
+
+// reuseResult returns a successful result.json whose request digest matches, if there is one.
+func reuseResult(dir, reqDigest string) (*provider.Result, bool) {
+	var req struct {
+		Digest string `json:"digest"`
+	}
+	if json.Unmarshal(mustRead(filepath.Join(dir, "request.json")), &req) != nil || req.Digest != reqDigest {
+		return nil, false
+	}
+	var res provider.Result
+	if json.Unmarshal(mustRead(filepath.Join(dir, "result.json")), &res) != nil || len(res.Payload) == 0 {
+		return nil, false
+	}
+	return &res, true
+}
+
+func (e *Engine) noteReported(role string, res *provider.Result) {
+	if e.State.Progress.Reported == nil {
+		e.State.Progress.Reported = map[string]string{}
+	}
+	e.State.Progress.Reported[role] = res.Reported.Model + ":" + res.Reported.Effort
+}
+
+func exists(p string) bool { _, err := os.Stat(p); return err == nil }
 
 // budget stops before a call that would exceed the limits (§7).
 func (e *Engine) budget() *Outcome {
@@ -588,10 +656,10 @@ func (e *Engine) deriveBudget(steps int) {
 	k := max(e.Cfg.DetailBatch, 1)
 	b := (steps + k - 1) / k
 	c := 2 * e.Cfg.ReviewRounds * (b + 3)
-	flag := l.Source == "flag"
-	l.MaxLogicalCalls, l.Source = c, "derived"
-	if !flag {
-		l.MaxAttempts = provider.MaxAttempts * c
+	l.ExplicitAttempts = l.ExplicitAttempts || l.Source == "flag"
+	l.MaxLogicalCalls, l.Source = l.BaseLogicalCalls+c, "derived"
+	if !l.ExplicitAttempts {
+		l.MaxAttempts = l.BaseAttempts + provider.MaxAttempts*c
 	}
 }
 
@@ -679,6 +747,23 @@ func (e *Engine) prompt(stage, role string, rev int) (string, error) {
 		if err := e.detailPromptData(&d, role); err != nil {
 			return "", err
 		}
+		return renderPrompt(stage, role, d)
+	}
+	if stage == StageIntegration {
+		reqs, err := e.requirements()
+		if err != nil {
+			return "", err
+		}
+		for _, r := range reqs {
+			if r.Mandatory {
+				var cs []string
+				for _, c := range r.Criteria {
+					cs = append(cs, c.ID)
+				}
+				d.Expected = append(d.Expected, r.ID+" ("+strings.Join(cs, ", ")+")")
+			}
+		}
+		d.ResearchPath = ""
 		return renderPrompt(stage, role, d)
 	}
 	if role == "reviewer" {
@@ -785,6 +870,12 @@ func (e *Engine) logf(format string, a ...any) {
 func digest(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 
 func mustRead(p string) []byte { b, _ := os.ReadFile(p); return b }
+
+func jsonUnmarshalStrict(b []byte, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	return dec.Decode(v)
+}
 
 func writeJSON(path string, v any) error {
 	b, err := json.MarshalIndent(v, "", " ")

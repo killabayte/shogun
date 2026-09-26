@@ -92,19 +92,20 @@ func TestPlanIntakeHappyPathAndStatus(t *testing.T) {
 	os.WriteFile(filepath.Join(ws, ".shogun", "config.toml"), []byte("project = \"demo\"\n"), 0o644)
 	useFakeModels(t)
 	code, out, errs := runCLI(t, ws, "plan", "Add rate limiting", "--repo", ws, "--repo", repoB, "--input", "spec.md", "--json")
-	if code != ExitError || !strings.Contains(errs, "[intake] complete") || !strings.Contains(errs, "[outline] approved") {
+	if code != ExitOK || !strings.Contains(errs, "[intake] complete") || !strings.Contains(errs, "[integration] approved") {
 		t.Fatalf("intake: code=%d out=%q err=%q", code, out, errs)
 	}
 	var res struct {
 		RunID  string `json:"run_id"`
 		Status string `json:"status"`
+		Path   string `json:"path"`
 		Reason string `json:"reason"`
 	}
-	if err := json.Unmarshal([]byte(out), &res); err != nil || res.Status != "paused" || !strings.Contains(res.Reason, "not_implemented") {
+	if err := json.Unmarshal([]byte(out), &res); err != nil || res.Status != "approved" || res.Path != filepath.Join(ws, "docs", "plans", res.RunID+".md") {
 		t.Fatalf("json result: %v %+v (%s)", err, res, out)
 	}
 	runDir := filepath.Join(ws, ".shogun", "runs", res.RunID)
-	for _, f := range []string{"task.md", "manifest.json", "config.snapshot.toml", "state.json", filepath.Join("inputs", "01-spec.md")} {
+	for _, f := range []string{"task.md", "manifest.json", "config.snapshot.toml", "state.json", filepath.Join("inputs", "01-spec.md"), "PLAN.md", "approval.json"} {
 		if _, err := os.Stat(filepath.Join(runDir, f)); err != nil {
 			t.Errorf("missing %s", f)
 		}
@@ -113,7 +114,13 @@ func TestPlanIntakeHappyPathAndStatus(t *testing.T) {
 		t.Errorf("run dir perm %v", fi.Mode())
 	}
 	code, out, _ = runCLI(t, ws, "status", res.RunID)
-	if code != ExitOK || !strings.Contains(out, "status:     paused") || !strings.Contains(out, "stage:      integration") {
+	if code, out, errs := runCLI(t, ws, "verify", res.Path); code != ExitOK || !strings.Contains(out+errs, "valid") {
+		t.Fatalf("published plan does not verify: %d %q %q", code, out, errs)
+	}
+	if _, err := os.Stat(strings.TrimSuffix(res.Path, ".md") + ".approval.json"); err != nil {
+		t.Fatalf("sidecar receipt: %v", err)
+	}
+	if code != ExitOK || !strings.Contains(out, "status:     approved") || !strings.Contains(out, "stage:      publish") {
 		t.Fatalf("status: %d %q", code, out)
 	}
 	code, out, _ = runCLI(t, ws, "status", runDir, "--json") // documented order: flags after the id

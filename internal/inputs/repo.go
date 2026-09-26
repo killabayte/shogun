@@ -38,8 +38,10 @@ var excludedDirs = map[string]bool{".git": true, ".shogun": true, "node_modules"
 var shogunOwnDirs = map[string]bool{".git": true, ".shogun": true}
 
 // RepoManifest fingerprints a repository root. Content of dirty tracked files and untracked
-// files is hashed; unchanged tracked files are represented by HEAD (no full rescan).
-func RepoManifest(ctx context.Context, id, root string) (Repo, error) {
+// files is hashed; unchanged tracked files are represented by HEAD (no full rescan). Files listed in
+// exclude (absolute paths: the plan Shogun will publish and its receipt, §3) are left out, so
+// Shogun's own output is never input drift.
+func RepoManifest(ctx context.Context, id, root string, exclude ...string) (Repo, error) {
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		return Repo{}, err
@@ -52,13 +54,17 @@ func RepoManifest(ctx context.Context, id, root string) (Repo, error) {
 		return Repo{}, fmt.Errorf("repo %s: not a directory: %v", root, err)
 	}
 	r := Repo{ID: id, Root: abs}
+	skip := map[string]bool{}
+	for _, p := range exclude {
+		skip[normalize(p)] = true
+	}
 	if _, err := os.Stat(filepath.Join(abs, ".git")); err == nil {
 		r.IsGit = true
-		if err := gitFingerprint(ctx, &r); err != nil {
+		if err := gitFingerprint(ctx, &r, skip); err != nil {
 			return r, err
 		}
 	} else {
-		sum, err := inventory(abs)
+		sum, err := inventory(abs, skip)
 		if err != nil {
 			return r, err
 		}
@@ -83,7 +89,21 @@ func git(ctx context.Context, root string, args ...string) ([]byte, error) {
 	return out, nil
 }
 
-func gitFingerprint(ctx context.Context, r *Repo) error {
+// normalize resolves symlinks of p, or of its directory when p does not exist yet.
+func normalize(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	if dir, err := filepath.EvalSymlinks(filepath.Dir(p)); err == nil {
+		return filepath.Join(dir, filepath.Base(p))
+	}
+	return p
+}
+
+func gitFingerprint(ctx context.Context, r *Repo, skip map[string]bool) error {
 	head, err := git(ctx, r.Root, "rev-parse", "--verify", "-q", "HEAD")
 	base := EmptyTree
 	if err == nil {
@@ -104,7 +124,7 @@ func gitFingerprint(ctx context.Context, r *Repo) error {
 	}
 	h := sha256.New()
 	for _, rel := range strings.Split(string(untracked), "\x00") {
-		if rel == "" || underShogunOwn(rel) {
+		if rel == "" || underShogunOwn(rel) || skip[filepath.Join(r.Root, rel)] {
 			continue
 		}
 		p := filepath.Join(r.Root, rel)
@@ -149,7 +169,7 @@ func underShogunOwn(rel string) bool {
 }
 
 // inventory hashes (relpath, size, mtime_ns) of a non-git tree with documented exclusions.
-func inventory(root string) (string, error) {
+func inventory(root string, skip map[string]bool) (string, error) {
 	h := sha256.New()
 	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -159,6 +179,9 @@ func inventory(root string) (string, error) {
 			if p != root && excludedDirs[d.Name()] {
 				return filepath.SkipDir
 			}
+			return nil
+		}
+		if skip[p] {
 			return nil
 		}
 		rel, _ := filepath.Rel(root, p)
@@ -188,7 +211,7 @@ var ErrDrift = errors.New("inputs changed since the manifest was taken")
 func CheckDrift(ctx context.Context, m *Manifest) ([]string, error) {
 	var changed []string
 	for _, r := range m.Repos {
-		cur, err := RepoManifest(ctx, r.ID, r.Root)
+		cur, err := RepoManifest(ctx, r.ID, r.Root, m.Exclude...)
 		if err != nil {
 			return nil, err
 		}

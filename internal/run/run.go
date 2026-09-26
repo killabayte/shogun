@@ -54,6 +54,13 @@ type Limits struct {
 	MaxActiveSeconds float64 `json:"max_active_seconds"`
 	CallDeadlineSecs float64 `json:"call_deadline_seconds"`
 	Source           string  `json:"source"` // "pre-outline" | "derived" | "flag"
+	// Spend at the start of the current generation: a refreshed run gets its own reserve on top
+	// of what earlier generations spent (counters are never reset).
+	BaseLogicalCalls int `json:"base_logical_calls,omitempty"`
+	BaseAttempts     int `json:"base_attempts,omitempty"`
+	// ExplicitAttempts: MaxAttempts is the user's --max-calls cap. It survives budget derivation and
+	// refresh until the user changes it.
+	ExplicitAttempts bool `json:"explicit_attempts,omitempty"`
 }
 
 // State is the checkpointed run state (state.json).
@@ -68,6 +75,7 @@ type State struct {
 	Limits     Limits            `json:"limits"`
 	Hashes     map[string]string `json:"hashes,omitempty"` // manifest, requirements revision, candidate…
 	Progress   Progress          `json:"progress"`
+	Publish    Publication       `json:"publish"`
 	CreatedAt  string            `json:"created_at"`
 	UpdatedAt  string            `json:"updated_at"`
 }
@@ -86,6 +94,14 @@ type Progress struct {
 	QuestionRounds int               `json:"question_rounds"`      // question rounds asked so far (max 2)
 	Accepted       map[string]int    `json:"accepted"`             // step id -> accepted revision (steps/<id>/<n>.json)
 	BatchSize      int               `json:"batch_size,omitempty"` // detail batch after a context-driven shrink (0 = config)
+	Reported       map[string]string `json:"reported,omitempty"`   // role -> model/effort the CLI reported on its last call
+}
+
+// Publication is where the approved plan goes (§9). Paths are absolute; the receipt sits next to
+// the plan as <stem>.approval.json.
+type Publication struct {
+	Path string `json:"path"`
+	Done bool   `json:"done"`
 }
 
 // Finding is one ledger entry. Only the reviewer closes a finding (resolved|rejected); a finding

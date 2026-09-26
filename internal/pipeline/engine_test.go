@@ -12,6 +12,7 @@ import (
 
 	"github.com/killabayte/shogun/internal/config"
 	"github.com/killabayte/shogun/internal/inputs"
+	"github.com/killabayte/shogun/internal/library"
 	"github.com/killabayte/shogun/internal/planning/schema"
 	"github.com/killabayte/shogun/internal/provider"
 	"github.com/killabayte/shogun/internal/run"
@@ -30,6 +31,12 @@ type script struct {
 
 func (s *script) Run(ctx context.Context, req provider.Request) (*provider.Result, error) {
 	s.prompts = append(s.prompts, req.Prompt)
+	if len(s.prompts) > len(s.replies) && strings.Contains(req.Prompt, "This is the FINAL review") {
+		// Tests about earlier stages end here: an unscripted final review stops the run with the
+		// cursor at integration.
+		s.prompts = s.prompts[:len(s.prompts)-1]
+		return nil, &provider.Error{Class: provider.ClassCanceled, Msg: "test stops before the final review"}
+	}
 	if len(s.prompts) > len(s.replies) {
 		s.t.Fatalf("%s: unexpected call %d:\n%s", s.name, len(s.prompts), req.Prompt)
 	}
@@ -179,6 +186,11 @@ func stepReview(verdict string, findings []map[string]any, steps ...step) map[st
 	return d
 }
 
+// finalReview is an integration review covering every requirement of the given steps.
+func finalReview(verdict string, findings []map[string]any, steps ...step) map[string]any {
+	return stepReview(verdict, findings, steps...)
+}
+
 // details appends an accepting planner/reviewer exchange for each step, one batch per step.
 func details(planner, reviewer []reply, steps ...step) ([]reply, []reply) {
 	for _, st := range steps {
@@ -212,8 +224,14 @@ func newFixture(t *testing.T, planner, reviewer []reply) *fixture {
 	st := run.NewState("20260926-000000-test-abcd", time.Now())
 	st.Limits = run.Limits{MaxLogicalCalls: 4 * cfg.ReviewRounds, MaxAttempts: 12 * cfg.ReviewRounds, Source: "pre-outline"}
 	f := &fixture{planner: &script{t: t, name: "planner", replies: planner}, reviewer: &script{t: t, name: "reviewer", replies: reviewer}}
+	st.Publish.Path = filepath.Join(ws, "docs", "plans", "20260926-000000-test-abcd.md")
+	exclude := []string{st.Publish.Path, library.ReceiptPath(st.Publish.Path)}
+	repo, err := inputs.RepoManifest(context.Background(), "repo-1", ws, exclude...)
+	if err != nil {
+		t.Fatal(err)
+	}
 	f.e = &Engine{Run: r, State: st, Task: "Add a --version flag", Cfg: cfg, Planner: f.planner, Reviewer: f.reviewer,
-		Manifest: &inputs.Manifest{Repos: []inputs.Repo{{ID: "repo-1", Root: ws}}}, Log: &f.log, Now: time.Now,
+		Manifest: &inputs.Manifest{Repos: []inputs.Repo{repo}, Exclude: exclude}, Log: &f.log, Now: time.Now, Project: "test",
 		Fetch: func(ctx context.Context, dir string, urls []string) ([]inputs.Source, error) { return nil, nil }}
 	return f
 }
@@ -231,23 +249,27 @@ func (f *fixture) execute(t *testing.T) Outcome {
 
 // ---- tests ----
 
-func TestHappyPathStopsBeforeIntegration(t *testing.T) {
+func TestHappyPathPublishesAVerifiedPlan(t *testing.T) {
 	pl, rv := details([]reply{fixed(research(r1)), fixed(outline(step{"S-001", []string{"R-001.C1"}}))},
 		[]reply{fixed(review("approve", researchOK, nil)), fixed(review("approve", outlineOK, nil))}, step{"S-001", []string{"R-001.C1"}})
+	rv = append(rv, fixed(finalReview("approve", nil, step{"S-001", []string{"R-001.C1"}})))
 	f := newFixture(t, pl, rv)
 	o := f.execute(t)
-	if o.Status != run.StatusPaused || !strings.Contains(o.Reason, "P5") {
+	if o.Status != run.StatusApproved || !strings.Contains(o.Reason, "published") {
 		t.Fatalf("outcome %+v\n%s", o, f.log.String())
 	}
 	st := f.e.State
-	if st.Cursor.Stage != StageIntegration || st.Progress.Approved[StageResearch] != 1 || st.Progress.Approved[StageOutline] != 1 || st.Progress.Accepted["S-001"] != 1 {
-		t.Fatalf("state %+v", st.Progress)
+	if st.Cursor.Stage != StagePublish || !st.Publish.Done || st.Progress.Approved[StageResearch] != 1 || st.Progress.Approved[StageOutline] != 1 || st.Progress.Accepted["S-001"] != 1 {
+		t.Fatalf("state %+v %+v", st.Progress, st.Publish)
+	}
+	if got, note := library.Verify(st.Publish.Path); got != library.Valid {
+		t.Fatalf("published plan: %s %s", got, note)
 	}
 	// C = 2R(B+3) for N=1, k=1, R=6 → 48 logical calls, 144 attempts.
 	if st.Limits.MaxLogicalCalls != 48 || st.Limits.MaxAttempts != 144 || st.Limits.Source != "derived" {
 		t.Fatalf("limits %+v", st.Limits)
 	}
-	if st.Counters.LogicalCalls != 6 || st.Counters.Attempts != 6 || st.Counters.ReviewRounds != 3 {
+	if st.Counters.LogicalCalls != 7 || st.Counters.Attempts != 7 || st.Counters.ReviewRounds != 4 {
 		t.Fatalf("counters %+v", st.Counters)
 	}
 	for _, p := range append(f.planner.prompts, f.reviewer.prompts...) {
@@ -255,7 +277,8 @@ func TestHappyPathStopsBeforeIntegration(t *testing.T) {
 			t.Fatalf("prompt lacks the minimal rule or the task:\n%s", p)
 		}
 	}
-	for _, a := range []string{"research/1.json", "outline/1.json", "reviews/research-1.json", "reviews/outline-1.json", "calls/0001-research-planner/prompt.md", "calls/0004-outline-reviewer/result.json"} {
+	for _, a := range []string{"research/1.json", "outline/1.json", "reviews/research-1.json", "reviews/outline-1.json", "calls/0001-research-planner/prompt.md",
+		"calls/0004-outline-reviewer/result.json", "calls/0001-research-planner/request.json", "integration/1.md", "candidate.md", "approval.json", "PLAN.md", "reviews/integration-1.json"} {
 		if _, err := os.Stat(filepath.Join(f.e.Run.Dir, a)); err != nil {
 			t.Errorf("artifact %s: %v", a, err)
 		}
@@ -264,7 +287,7 @@ func TestHappyPathStopsBeforeIntegration(t *testing.T) {
 		t.Errorf("accepted step not archived: %v", err)
 	}
 	loaded, err := f.e.Run.LoadState()
-	if err != nil || loaded.Cursor.Stage != StageIntegration {
+	if err != nil || loaded.Status != run.StatusApproved {
 		t.Fatalf("checkpoint: %v %+v", err, loaded)
 	}
 }

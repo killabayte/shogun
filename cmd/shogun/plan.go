@@ -10,6 +10,7 @@ import (
 
 	"github.com/killabayte/shogun/internal/config"
 	"github.com/killabayte/shogun/internal/inputs"
+	"github.com/killabayte/shogun/internal/library"
 	"github.com/killabayte/shogun/internal/run"
 )
 
@@ -60,7 +61,7 @@ func (a *app) cmdPlan(args []string) int {
 	st.Limits = run.Limits{MaxLogicalCalls: 4 * cfg.ReviewRounds, MaxAttempts: 3 * 4 * cfg.ReviewRounds,
 		CallDeadlineSecs: cfg.CallDeadline.Seconds(), Source: "pre-outline"}
 	if cfg.MaxCalls > 0 {
-		st.Limits.MaxAttempts, st.Limits.Source = cfg.MaxCalls, "flag"
+		st.Limits.MaxAttempts, st.Limits.Source, st.Limits.ExplicitAttempts = cfg.MaxCalls, "flag", true
 	}
 	if cfg.MaxTime > 0 {
 		st.Limits.MaxActiveSeconds = cfg.MaxTime.Seconds()
@@ -88,9 +89,11 @@ func (a *app) cmdPlan(args []string) int {
 		return fail(ExitError, "write config snapshot", err)
 	}
 	fmt.Fprintf(a.stderr, "[intake] run %s\n", id)
-	man := &inputs.Manifest{Version: inputs.ManifestVersion, CreatedAt: now.UTC().Format(time.RFC3339), Workspace: a.cwd}
+	st.Publish.Path = outputPath(*out, cfg, a.cwd, id)
+	man := &inputs.Manifest{Version: inputs.ManifestVersion, CreatedAt: now.UTC().Format(time.RFC3339), Workspace: a.cwd,
+		Exclude: []string{st.Publish.Path, library.ReceiptPath(st.Publish.Path)}}
 	for i, root := range repos {
-		rp, err := inputs.RepoManifest(a.ctx, fmt.Sprintf("repo-%d", i+1), root)
+		rp, err := inputs.RepoManifest(a.ctx, fmt.Sprintf("repo-%d", i+1), root, man.Exclude...)
 		if err != nil {
 			return fail(ExitError, "repository "+root, err)
 		}
@@ -123,7 +126,6 @@ func (a *app) cmdPlan(args []string) int {
 		return a.errorf("%v", err)
 	}
 	fmt.Fprintf(a.stderr, "[intake] complete: %s\n", r.Dir)
-	_ = out // used by publication (P5)
 	return a.runPipeline(r, st, cfg, *auto || !a.interactive, *asJSON)
 }
 

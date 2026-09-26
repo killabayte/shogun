@@ -286,7 +286,8 @@ func TestSixRoundsPerStepFitTheBudget(t *testing.T) {
 	if o.Status != run.StatusPaused || f.e.State.Cursor.Stage != StageIntegration {
 		t.Fatalf("%+v\n%s", o, f.log.String())
 	}
-	if c, l := f.e.State.Counters.LogicalCalls, f.e.State.Limits.MaxLogicalCalls; c != 4+2*6*n || c > l {
+	// +1: the unscripted final review that stops the test is counted as a call too.
+	if c, l := f.e.State.Counters.LogicalCalls, f.e.State.Limits.MaxLogicalCalls; c != 4+2*6*n+1 || c > l {
 		t.Fatalf("calls %d within limit %d", c, l)
 	}
 	g, _ := newChain(t, n, pl, rv)
@@ -311,7 +312,7 @@ func TestResumeKeepsDetailProgressAndCounters(t *testing.T) {
 	}
 	g := newFixture(t, []reply{batch(steps[1])}, []reply{fixed(stepReview("approve", nil, steps[1]))})
 	g.e.Run, g.e.State = f.e.Run, st
-	if o := g.execute(t); o.Status != run.StatusPaused || g.e.State.Cursor.Stage != StageIntegration || g.e.State.Counters.LogicalCalls != 9 {
+	if o := g.execute(t); o.Status != run.StatusPaused || g.e.State.Cursor.Stage != StageIntegration || g.e.State.Counters.LogicalCalls != 10 {
 		t.Fatalf("resume: %+v %+v", o, g.e.State.Counters)
 	}
 }

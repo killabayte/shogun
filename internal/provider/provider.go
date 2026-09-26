@@ -56,6 +56,8 @@ type Result struct {
 	Degraded  []string        `json:"degraded,omitempty"` // non-fatal signals worth archiving
 	Attempts  int             `json:"attempts"`
 	Dir       string          `json:"dir"` // directory of the accepted attempt
+	// ActiveSeconds is set by the caller that measured the call (not by the adapter).
+	ActiveSeconds float64 `json:"active_seconds,omitempty"`
 }
 
 // Class tells callers what to do with a failure.

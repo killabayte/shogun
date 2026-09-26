@@ -239,7 +239,8 @@ type Manifest struct {
 	Workspace   string   `json:"workspace"`
 	Repos       []Repo   `json:"repos"`
 	Inputs      []Source `json:"inputs"`
-	Fingerprint string   `json:"fingerprint"` // digest over repo fingerprints + input hashes
+	Exclude     []string `json:"exclude,omitempty"` // Shogun's own output files, left out of repo fingerprints
+	Fingerprint string   `json:"fingerprint"`       // digest over repo fingerprints + input hashes
 }
 
 // Fingerprint computes the manifest digest from repo fingerprints and successful input hashes.

@@ -20,23 +20,24 @@ import (
 
 // runners returns the planner and reviewer for cfg after checking that the config preflight
 // certifies exactly this configuration (§8). Tests replace it.
-func (a *app) runners(ctx context.Context, cfg config.Config) (provider.Runner, provider.Runner, error) {
+func (a *app) runners(ctx context.Context, cfg config.Config) (provider.Runner, provider.Runner, map[string]string, error) {
 	if a.newRunners != nil {
-		return a.newRunners(ctx, cfg)
+		p, r, err := a.newRunners(ctx, cfg)
+		return p, r, nil, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	claudePath, claudeVer, err := resolveBinary(ctx, cfg.ClaudeCommand)
 	if err != nil {
-		return nil, nil, fmt.Errorf("claude: %v", err)
+		return nil, nil, nil, fmt.Errorf("claude: %v", err)
 	}
 	codexPath, codexVer, err := resolveBinary(ctx, cfg.CodexCommand)
 	if err != nil {
-		return nil, nil, fmt.Errorf("codex: %v (set codex_command)", err)
+		return nil, nil, nil, fmt.Errorf("codex: %v (set codex_command)", err)
 	}
 	features, _, err := checkCodexFeatures(ctx, codexPath)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	fp := provider.Fingerprint(preflightItems(cfg, claudePath, claudeVer, codexPath, codexVer, features, a.getenv))
 	rec, err := provider.LoadPreflight(filepath.Join(a.cwd, ".shogun", "preflight.json"))
@@ -44,9 +45,9 @@ func (a *app) runners(ctx context.Context, cfg config.Config) (provider.Runner, 
 		err = rec.Verify(fp)
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return &provider.Claude{Bin: claudePath}, &provider.Codex{Bin: codexPath}, nil
+	return &provider.Claude{Bin: claudePath}, &provider.Codex{Bin: codexPath}, map[string]string{"claude": claudeVer, "codex": codexVer}, nil
 }
 
 // runPipeline executes the stages for an opened, locked run and maps the outcome to an exit code.
@@ -62,7 +63,7 @@ func (a *app) runPipeline(r *run.Run, st *run.State, cfg config.Config, auto, as
 		fmt.Fprintf(a.stderr, "run %s → needs_input: %s\n", st.RunID, st.Reason)
 		return ExitNeedsInput
 	}
-	planner, reviewer, err := a.runners(a.ctx, cfg)
+	planner, reviewer, versions, err := a.runners(a.ctx, cfg)
 	if err != nil {
 		st.Status, st.Reason = run.StatusFailed, "preflight: "+err.Error()
 		_ = r.SaveState(st, a.now())
@@ -72,16 +73,22 @@ func (a *app) runPipeline(r *run.Run, st *run.State, cfg config.Config, auto, as
 		return a.errorf("%v", err)
 	}
 	e := &pipeline.Engine{Run: r, State: st, Manifest: man, Task: task, Cfg: cfg, Planner: planner, Reviewer: reviewer,
-		Log: a.stderr, Now: a.now}
+		Log: a.stderr, Now: a.now, Project: projectName(cfg, a.cwd), CLIVersions: versions}
 	if !auto {
 		e.Asker = &terminalAsker{in: bufio.NewReader(a.stdin), out: a.stderr}
 	}
 	o := e.Execute(a.ctx)
 	code := ExitError
+	path := ""
 	switch {
+	case o.Status == run.StatusApproved:
+		code, path = ExitOK, st.Publish.Path
 	case o.Status == run.StatusNeedsInput:
 		code = ExitNeedsInput
-		fmt.Fprintf(a.stderr, "answer the questions in %s and run: shogun resume %s --answers answers.json\n", filepath.Join(r.Dir, "questions.json"), st.RunID)
+		// The answers file goes into the run directory: a file added to a studied repository would
+		// itself be input drift.
+		fmt.Fprintf(a.stderr, "answer the questions in %s, save the answers as %s and run: shogun resume %s --answers %s\n",
+			filepath.Join(r.Dir, "questions.json"), filepath.Join(r.Dir, "answers.json"), st.RunID, filepath.Join(r.Dir, "answers.json"))
 	case o.Status == run.StatusPaused && strings.HasPrefix(o.Reason, "not_implemented"):
 		code = ExitError
 	case o.Status == run.StatusPaused && strings.HasPrefix(o.Reason, "canceled"):
@@ -90,11 +97,36 @@ func (a *app) runPipeline(r *run.Run, st *run.State, cfg config.Config, auto, as
 		code = ExitLimit
 	}
 	if asJSON {
-		fmt.Fprintf(a.stdout, `{"run_id":%q,"status":%q,"path":"","reason":%q}`+"\n", st.RunID, o.Status, o.Reason)
+		fmt.Fprintf(a.stdout, `{"run_id":%q,"status":%q,"path":%q,"reason":%q}`+"\n", st.RunID, o.Status, path, o.Reason)
 	} else {
 		fmt.Fprintf(a.stderr, "run %s → %s: %s (%s)\n", st.RunID, o.Status, o.Reason, r.Dir)
+		if path != "" {
+			fmt.Fprintln(a.stdout, path)
+		}
 	}
 	return code
+}
+
+// projectName is the configured project, or a safe slug of the workspace directory (§3).
+func projectName(cfg config.Config, workspace string) string {
+	if cfg.Project != "" {
+		return cfg.Project
+	}
+	return run.Slugify(filepath.Base(workspace))
+}
+
+// outputPath is the plan's single primary file (§3): --out, else plans_dir/<project>/<run-id>.md,
+// else <workspace>/docs/plans/<run-id>.md.
+func outputPath(out string, cfg config.Config, workspace, runID string) string {
+	switch {
+	case out != "" && filepath.IsAbs(out):
+		return out
+	case out != "":
+		return filepath.Join(workspace, out)
+	case cfg.PlansDir != "":
+		return filepath.Join(cfg.PlansDir, projectName(cfg, workspace), runID+".md")
+	}
+	return filepath.Join(workspace, "docs", "plans", runID+".md")
 }
 
 // terminalAsker shows a batch of questions with the recommendation and reads one line per answer;

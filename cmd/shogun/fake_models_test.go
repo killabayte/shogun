@@ -11,6 +11,7 @@ import (
 
 	"github.com/killabayte/shogun/internal/config"
 	"github.com/killabayte/shogun/internal/provider"
+	"github.com/killabayte/shogun/internal/run"
 )
 
 // fakeModel answers every stage with a minimal valid document chosen by the output schema:
@@ -31,7 +32,7 @@ func (fakeModel) Run(ctx context.Context, req provider.Request) (*provider.Resul
 		switch {
 		case strings.Contains(req.Prompt, "stage OUTLINE"):
 			target = "S-001"
-		case strings.Contains(req.Prompt, "stage DETAIL"):
+		case strings.Contains(req.Prompt, "stage DETAIL"), strings.Contains(req.Prompt, "FINAL review"):
 			target, refs = "S-001", []string{"S-001/V-001"}
 		}
 		doc = map[string]any{"schema_version": 1, "verdict": "approve", "summary": "ok", "findings": []any{}, "dispositions": []any{},
@@ -93,25 +94,53 @@ func TestPlanNeedsInputThenResumeWithAnswers(t *testing.T) {
 	if code != ExitNeedsInput || res.Status != "needs_input" {
 		t.Fatalf("plan: %d %q %q", code, out, errs)
 	}
-	answers := filepath.Join(ws, "answers.json")
-	os.WriteFile(filepath.Join(ws, "versioning.md"), []byte("use semver\n"), 0o600)
-	os.WriteFile(answers, []byte(`{"schema_version":1,"answers":[{"question_id":"Q-001","answer":"semver","files":["versioning.md"]}]}`), 0o600)
+	// Outside the studied repository: a new file there would be input drift.
+	outside := t.TempDir()
+	answers := filepath.Join(outside, "answers.json")
+	os.WriteFile(filepath.Join(outside, "versioning.md"), []byte("use semver\n"), 0o600)
+	os.WriteFile(answers, []byte(`{"schema_version":1,"answers":[{"question_id":"Q-001","answer":"semver","files":["`+filepath.Join(outside, "versioning.md")+`"]}]}`), 0o600)
 	code, _, errs = runCLI(t, ws, "resume", res.RunID, "--answers", answers)
-	if code != ExitError || !strings.Contains(errs, "[outline] approved") || !strings.Contains(errs, "1 answer(s) recorded") {
+	if code != ExitOK || !strings.Contains(errs, "[integration] approved") || !strings.Contains(errs, "1 answer(s) recorded") {
 		t.Fatalf("resume: %d %q", code, errs)
 	}
-	if code, out, _ := runCLI(t, ws, "status", res.RunID); code != ExitOK || !strings.Contains(out, "stage:      integration") {
+	if code, out, _ := runCLI(t, ws, "status", res.RunID); code != ExitOK || !strings.Contains(out, "status:     approved") {
 		t.Fatalf("status after resume: %q", out)
 	}
 	// The answer's file became a snapshot input the models were told to read.
 	runDir := filepath.Join(ws, ".shogun", "runs", res.RunID)
 	man, _ := os.ReadFile(filepath.Join(runDir, "manifest.json"))
-	if !strings.Contains(string(man), `"ans-1"`) || !strings.Contains(errs, "ans-1 versioning.md") {
+	if !strings.Contains(string(man), `"ans-1"`) || !strings.Contains(errs, "versioning.md → answers-1/") {
 		t.Fatalf("answer file not attached: %s", man)
 	}
 	prompts, _ := filepath.Glob(filepath.Join(runDir, "calls", "*-research-planner", "prompt.md"))
 	last, _ := os.ReadFile(prompts[len(prompts)-1])
 	if !strings.Contains(string(last), "- ans-1: ") {
 		t.Fatalf("answer file not in the prompt:\n%s", last)
+	}
+}
+
+// §13 P5: a second writer on the same run is refused while the first holds the lock.
+func TestConcurrentResumeIsRefused(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ws := gitRepo(t)
+	useFakeModels(t)
+	askFirst = true
+	defer func() { askFirst = false }()
+	_, out, _ := runCLI(t, ws, "plan", "--auto", "--json", "Add a version flag")
+	var res struct {
+		RunID string `json:"run_id"`
+	}
+	json.Unmarshal([]byte(out), &res)
+	r, err := run.Open(filepath.Join(ws, ".shogun", "runs", res.RunID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Lock(); err != nil {
+		t.Fatal(err)
+	}
+	defer r.Unlock()
+	code, _, errs := runCLI(t, ws, "resume", res.RunID)
+	if code != ExitError || !strings.Contains(errs, "lock") {
+		t.Fatalf("concurrent resume: %d %q", code, errs)
 	}
 }

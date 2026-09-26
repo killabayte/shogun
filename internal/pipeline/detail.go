@@ -28,6 +28,9 @@ func (e *Engine) unitLabel() string {
 
 // docRel is the run-relative path of the planner document for revision rev of the current unit.
 func (e *Engine) docRel(rev int) string {
+	if e.State.Cursor.Stage == StageIntegration {
+		return fmt.Sprintf("integration/%d.md", rev)
+	}
 	if e.State.Cursor.Stage == StageDetail {
 		return fmt.Sprintf("detail/%s/%d.json", strings.ReplaceAll(e.State.Cursor.Step, "+", "_"), rev)
 	}
@@ -205,9 +208,7 @@ func (e *Engine) detailGate(d *stageDoc, rev *schema.Review) []string {
 		}
 	}
 	notes := []string(schema.CoverageGateStrict(rev, scope))
-	// Associations (§5: "explicit results/coverage for each step"): every criterion the outline gave
-	// a step must be covered in its requirement's row, with that step as a target and a verification
-	// of that step; a row may cite only steps that carry some of its criteria.
+	// Associations (§5: "explicit results/coverage for each step").
 	carries := map[string]map[string]bool{} // requirement -> steps of this batch that carry its criteria
 	for _, s := range o.Steps {
 		if !contains(e.batchIDs(), s.ID) {
@@ -221,30 +222,7 @@ func (e *Engine) detailGate(d *stageDoc, rev *schema.Review) []string {
 			carries[r][s.ID] = true
 		}
 	}
-	for _, c := range rev.Coverage {
-		for _, t := range c.TargetIDs {
-			if !carries[c.RequirementID][t] {
-				notes = append(notes, fmt.Sprintf("%s cites step %s, which carries none of its criteria", c.RequirementID, t))
-			}
-		}
-		for _, v := range c.VerificationRefs {
-			if step, _, _ := strings.Cut(v, "/"); !carries[c.RequirementID][step] {
-				notes = append(notes, fmt.Sprintf("%s cites verification %s of a step that carries none of its criteria", c.RequirementID, v))
-			}
-		}
-		for step := range carries[c.RequirementID] {
-			if !contains(c.TargetIDs, step) {
-				notes = append(notes, fmt.Sprintf("%s: step %s carries its criteria but is not a target of the row", c.RequirementID, step))
-			}
-			proved := false
-			for _, v := range c.VerificationRefs {
-				proved = proved || strings.HasPrefix(v, step+"/")
-			}
-			if !proved {
-				notes = append(notes, fmt.Sprintf("%s: step %s has no verification cited for its criteria", c.RequirementID, step))
-			}
-		}
-	}
+	notes = append(notes, associations(rev, carries)...)
 	covered := map[string]bool{}
 	for _, c := range rev.Coverage {
 		for _, t := range c.TargetIDs {
@@ -280,6 +258,15 @@ func (e *Engine) backTarget(key string) string {
 			continue
 		}
 		switch {
+		case key == StageIntegration: // the final review may send the work to any earlier unit
+			switch t := f.TargetID; {
+			case t == StageResearch || strings.HasPrefix(t, "R-") || strings.HasPrefix(t, "FACT-"):
+				target = e.earliest(target, StageResearch)
+			case e.State.Progress.Accepted[t] > 0:
+				target = e.earliest(target, t)
+			default: // outline, "final" or anything plan-wide
+				target = e.earliest(target, StageOutline)
+			}
 		case f.TargetID == StageResearch && key != StageResearch,
 			f.TargetID == StageOutline && strings.HasPrefix(key, StageDetail+":"),
 			e.State.Progress.Accepted[f.TargetID] > 0 && !contains(e.batchIDs(), f.TargetID):

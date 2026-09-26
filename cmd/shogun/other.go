@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/killabayte/shogun/internal/config"
+	"github.com/killabayte/shogun/internal/inputs"
 	"github.com/killabayte/shogun/internal/library"
 	"github.com/killabayte/shogun/internal/pipeline"
 	"github.com/killabayte/shogun/internal/planning/schema"
@@ -44,8 +46,9 @@ func (a *app) cmdResume(args []string) int {
 	if err != nil {
 		return a.errorf("%v", err)
 	}
-	if st.Status == run.StatusApproved {
-		fmt.Fprintf(a.stderr, "[resume] run %s is already approved\n", st.RunID)
+	if st.Status == run.StatusApproved && st.Publish.Done {
+		fmt.Fprintf(a.stderr, "[resume] run %s is already approved and published\n", st.RunID)
+		fmt.Fprintln(a.stdout, st.Publish.Path)
 		return ExitOK
 	}
 	var ans *schema.Answers
@@ -59,12 +62,20 @@ func (a *app) cmdResume(args []string) int {
 		}
 		fmt.Fprintf(a.stderr, "[resume] answers file is valid (%s)\n", *answers)
 	}
-	if *refresh {
-		return a.errorf("--refresh (new generation after input drift) arrives in P5")
-	}
 	cfg, err := config.LoadSnapshot(filepath.Join(dir, "config.snapshot.toml")) // the run's own config (§9)
 	if err != nil {
 		return a.errorf("%v", err)
+	}
+	if *refresh {
+		if err := pipeline.Refresh(a.ctx, r, st, *cfg); err != nil {
+			return a.errorf("refresh: %v", err)
+		}
+		fmt.Fprintf(a.stderr, "[resume] new generation %d: repositories re-snapshotted, research starts again; spend so far is kept\n", st.Generation)
+	} else if man, err := inputs.Load(filepath.Join(dir, "manifest.json")); err == nil {
+		// §9: changed repositories need an explicit new generation; approvals are never inherited.
+		if drift, err := inputs.CheckDrift(a.ctx, man); errors.Is(err, inputs.ErrDrift) {
+			return a.errorf("inputs changed since the snapshot (%s): run `shogun resume %s --refresh` for a new generation", strings.Join(drift, ", "), st.RunID)
+		}
 	}
 	if ans != nil {
 		if err := a.attachAnswerFiles(dir, ans); err != nil {
@@ -79,7 +90,7 @@ func (a *app) cmdResume(args []string) int {
 	}
 	// Raising a limit is an explicit, recorded decision; it never lowers spend counters.
 	if *maxCalls > 0 {
-		st.Limits.MaxAttempts, st.Limits.Source = *maxCalls, "flag"
+		st.Limits.MaxAttempts, st.Limits.ExplicitAttempts = *maxCalls, true // the reserve's provenance is unchanged
 	}
 	if *maxTime > 0 {
 		st.Limits.MaxActiveSeconds = maxTime.Seconds()
