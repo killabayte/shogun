@@ -27,14 +27,22 @@ func (fakeModel) Run(ctx context.Context, req provider.Request) (*provider.Resul
 	var doc any
 	switch s := string(req.Schema); {
 	case strings.Contains(s, `"verdict"`):
-		stage := "research"
-		if strings.Contains(req.Prompt, "stage OUTLINE") {
-			stage = "outline"
+		target, refs := "FACT-001", []string{}
+		switch {
+		case strings.Contains(req.Prompt, "stage OUTLINE"):
+			target = "S-001"
+		case strings.Contains(req.Prompt, "stage DETAIL"):
+			target, refs = "S-001", []string{"S-001/V-001"}
 		}
-		target := map[string]string{"research": "FACT-001", "outline": "S-001"}[stage]
 		doc = map[string]any{"schema_version": 1, "verdict": "approve", "summary": "ok", "findings": []any{}, "dispositions": []any{},
-			"coverage":           []any{map[string]any{"requirement_id": "R-001", "criterion_ids": []string{"R-001.C1"}, "target_ids": []string{target}, "verification_refs": []string{}, "status": "covered"}},
+			"coverage":           []any{map[string]any{"requirement_id": "R-001", "criterion_ids": []string{"R-001.C1"}, "target_ids": []string{target}, "verification_refs": refs, "status": "covered"}},
 			"source_assessments": []any{}, "questions": []any{}}
+	case strings.Contains(s, `"rollback_or_why_not_applicable"`):
+		doc = map[string]any{"schema_version": 1, "questions": []any{}, "requested_changes": []any{}, "responses_to_findings": []any{},
+			"steps": []any{map[string]any{"id": "S-001", "title": "t", "objective": "o", "requirement_ids": []string{"R-001"}, "criterion_ids": []string{"R-001.C1"},
+				"depends_on": []string{}, "targets": []any{map[string]any{"repo_id": "repo-1", "path": "a.go", "operation": "modify"}},
+				"actions": []string{"edit a.go"}, "verification": []any{map[string]any{"id": "V-001", "repo_id": "repo-1", "method": "command", "expected": "ok"}},
+				"risks": []any{}, "rollback_or_why_not_applicable": "git revert"}}}
 	case strings.Contains(s, `"approach"`):
 		doc = map[string]any{"schema_version": 1, "approach": map[string]any{"summary": "s", "alternatives": []any{}},
 			"steps":                            []any{map[string]any{"id": "S-001", "title": "t", "objective": "o", "deliverable": "d", "depends_on": []string{}, "criterion_ids": []string{"R-001.C1"}}},
@@ -92,7 +100,7 @@ func TestPlanNeedsInputThenResumeWithAnswers(t *testing.T) {
 	if code != ExitError || !strings.Contains(errs, "[outline] approved") || !strings.Contains(errs, "1 answer(s) recorded") {
 		t.Fatalf("resume: %d %q", code, errs)
 	}
-	if code, out, _ := runCLI(t, ws, "status", res.RunID); code != ExitOK || !strings.Contains(out, "stage:      detail") {
+	if code, out, _ := runCLI(t, ws, "status", res.RunID); code != ExitOK || !strings.Contains(out, "stage:      integration") {
 		t.Fatalf("status after resume: %q", out)
 	}
 	// The answer's file became a snapshot input the models were told to read.

@@ -23,11 +23,12 @@ import (
 	"github.com/killabayte/shogun/internal/run"
 )
 
-// Stages in order. "detail" is where P3 stops.
+// Stages in order. P4 stops before integration.
 const (
-	StageResearch = "research"
-	StageOutline  = "outline"
-	StageDetail   = "detail"
+	StageResearch    = "research"
+	StageOutline     = "outline"
+	StageDetail      = "detail"
+	StageIntegration = "integration"
 )
 
 // Fetcher archives web sources found by the planner (nil = inputs.Materializer).
@@ -57,7 +58,7 @@ type Outcome struct {
 // Execute runs from the current cursor until the run stops.
 func (e *Engine) Execute(ctx context.Context) Outcome {
 	p := &e.State.Progress
-	for _, m := range []*map[string]int{&p.Revisions, &p.Approved, &p.Rounds} {
+	for _, m := range []*map[string]int{&p.Revisions, &p.Approved, &p.Rounds, &p.Accepted} {
 		if *m == nil {
 			*m = map[string]int{}
 		}
@@ -73,47 +74,51 @@ func (e *Engine) Execute(ctx context.Context) Outcome {
 	}
 	e.State.Status, e.State.Reason = run.StatusRunning, ""
 	for {
-		stage := e.State.Cursor.Stage
-		if stage != StageResearch && stage != StageOutline {
-			return *e.stop(run.StatusPaused, "not_implemented: the detail stage arrives in P4 (outline approved)")
+		if e.State.Cursor.Stage == StageIntegration {
+			return *e.stop(run.StatusPaused, "not_implemented: integration and publication arrive in P5 (every step accepted)")
 		}
-		if o := e.unit(ctx, stage); o != nil {
+		if o := e.unit(ctx); o != nil {
 			return *o
 		}
 	}
 }
 
-// unit runs review rounds of one stage until it is approved (cursor advances, nil) or stops.
-func (e *Engine) unit(ctx context.Context, stage string) *Outcome {
+// unit runs review rounds of the unit under the cursor (research, outline, or one detail batch)
+// until it is approved or sent back (cursor moves, nil) or the run stops.
+func (e *Engine) unit(ctx context.Context) *Outcome {
 	p := &e.State.Progress
-	stageStart := stage
-	for e.State.Cursor.Stage == stageStart {
+	stage := e.State.Cursor.Stage
+	if stage == StageDetail && e.State.Cursor.Step == "" {
+		return e.nextBatch()
+	}
+	key := e.unitKey()
+	for e.unitKey() == key {
 		if len(p.Pending) > 0 {
 			if o := e.resolveQuestions(ctx); o != nil {
 				return o
 			}
 		}
-		if p.Rounds[stage] >= e.Cfg.ReviewRounds {
-			return e.stop(run.StatusPaused, fmt.Sprintf("limit: %s used all %d review rounds", stage, e.Cfg.ReviewRounds))
+		if p.Rounds[key] >= e.Cfg.ReviewRounds {
+			return e.stop(run.StatusPaused, fmt.Sprintf("limit: %s used all %d review rounds", key, e.Cfg.ReviewRounds))
 		}
 		// Planner.
-		rev := p.Revisions[stage] + 1
+		rev := p.Revisions[key] + 1
 		prompt, err := e.prompt(stage, "planner", rev)
 		if err != nil {
 			return e.fail("prompt", err)
 		}
-		kind := schema.KindResearch
-		if stage == StageOutline {
-			kind = schema.KindOutline
+		if o, shrunk := e.fitsContext(stage, prompt, rev, false); o != nil || shrunk {
+			return o
 		}
-		res, o := e.call(ctx, "planner", stage, prompt, kind, stage == StageResearch)
+		kind := map[string]schema.Kind{StageResearch: schema.KindResearch, StageOutline: schema.KindOutline, StageDetail: schema.KindStep}[stage]
+		res, o := e.call(ctx, "planner", e.unitLabel(), prompt, kind, stage == StageResearch)
 		if o != nil {
 			return o
 		}
-		if err := e.Run.WriteArtifact(fmt.Sprintf("%s/%d.json", stage, rev), res.Payload); err != nil {
+		if err := e.Run.WriteArtifact(e.docRel(rev), res.Payload); err != nil {
 			return e.fail("write revision", err)
 		}
-		p.Revisions[stage] = rev
+		p.Revisions[key] = rev
 		doc, problems, err := e.check(stage, res.Payload)
 		if err != nil {
 			return e.fail("parse "+stage, err)
@@ -123,11 +128,11 @@ func (e *Engine) unit(ctx context.Context, stage string) *Outcome {
 		if err != nil {
 			return e.fail("decisions", err)
 		}
-		addQuestions(p, stage, "planner", doc.questions, settled)
+		addQuestions(p, key, "planner", doc.questions, settled)
 		if len(problems) > 0 { // Shogun's contract checks fail: back to the planner, no review.
 			p.GateNotes = problems
-			p.Rounds[stage]++
-			e.logf("[%s] r%d: %d contract problem(s), back to the planner", stage, rev, len(problems))
+			p.Rounds[key]++
+			e.logf("[%s] r%d: %d contract problem(s), back to the planner", key, rev, len(problems))
 			if o := e.checkpoint(); o != nil {
 				return o
 			}
@@ -138,8 +143,8 @@ func (e *Engine) unit(ctx context.Context, stage string) *Outcome {
 				return o
 			}
 		}
-		if doc.wantsResearch { // the planner itself says the approved research must change
-			return e.backToResearch(doc.researchReasons)
+		if doc.back != "" { // the planner itself says approved earlier work must change
+			return e.backTo(doc.back, doc.backReasons)
 		}
 		if hasBlocking(p.Pending) { // answer first, then a new revision under the answers
 			if o := e.checkpoint(); o != nil {
@@ -156,7 +161,10 @@ func (e *Engine) unit(ctx context.Context, stage string) *Outcome {
 		if err != nil {
 			return e.fail("prompt", err)
 		}
-		rres, o := e.call(ctx, "reviewer", stage, prompt, schema.KindReview, false)
+		if o, shrunk := e.fitsContext(stage, prompt, rev, true); o != nil || shrunk {
+			return o
+		}
+		rres, o := e.call(ctx, "reviewer", e.unitLabel(), prompt, schema.KindReview, false)
 		if o != nil {
 			return o
 		}
@@ -164,35 +172,28 @@ func (e *Engine) unit(ctx context.Context, stage string) *Outcome {
 		if err != nil {
 			return e.fail("parse review", err)
 		}
-		where := fmt.Sprintf("%s r%d", stage, rev)
-		if err := e.Run.WriteArtifact(fmt.Sprintf("reviews/%s-%d.json", stage, rev), rres.Payload); err != nil {
+		where := fmt.Sprintf("%s r%d", key, rev)
+		if err := e.Run.WriteArtifact(fmt.Sprintf("reviews/%s-%d.json", e.unitLabel(), rev), rres.Payload); err != nil {
 			return e.fail("write review", err)
 		}
-		notes := applyReview(p, stage, where, review, relevant(p, stage))
-		p.Rounds[stage]++
+		notes := applyReview(p, key, where, review, relevant(p, key))
+		p.Rounds[key]++
 		e.State.Counters.ReviewRounds++
-		addQuestions(p, stage, "reviewer", review.Questions, settled)
+		addQuestions(p, key, "reviewer", review.Questions, settled)
 		notes = append(notes, e.gate(stage, doc, review)...)
-		notes = append(notes, e.sourceGate(stage, review)...)
-		e.logf("[%s] r%d: reviewer %s, %d open finding(s), %d gate note(s)", stage, rev, review.Verdict, len(openFindings(p)), len(notes))
+		notes = append(notes, e.sourceGate(key, review)...)
+		e.logf("[%s] r%d: reviewer %s, %d open finding(s), %d gate note(s)", key, rev, review.Verdict, len(relevant(p, key)), len(notes))
 
-		if stage == StageOutline && targetsResearch(p) {
-			return e.backToResearch(notes)
+		if target := e.backTarget(key); target != "" {
+			return e.backTo(target, notes)
 		}
-		if review.Verdict == "approve" && len(notes) == 0 && len(relevant(p, stage)) == 0 && len(p.Pending) == 0 {
-			p.Approved[stage], p.GateNotes = rev, nil
-			if stage == StageResearch {
-				e.State.Cursor = run.Cursor{Stage: StageOutline}
-				e.State.Hashes["requirements"] = digest(res.Payload)
-			} else {
-				e.State.Cursor = run.Cursor{Stage: StageDetail}
-				e.deriveBudget(len(doc.outline.Steps))
-			}
-			e.logf("[%s] approved at r%d", stage, rev)
-			return e.checkpoint()
+		if review.Verdict == "approve" && len(notes) == 0 && len(relevant(p, key)) == 0 && len(p.Pending) == 0 {
+			p.GateNotes = nil
+			e.logf("[%s] approved at r%d", key, rev)
+			return e.approve(stage, rev, doc, res.Payload)
 		}
 		p.GateNotes = notes
-		if o := e.stalemate(stage, res.Payload); o != nil {
+		if o := e.stalemate(key, res.Payload); o != nil {
 			return o
 		}
 		if o := e.checkpoint(); o != nil {
@@ -202,19 +203,50 @@ func (e *Engine) unit(ctx context.Context, stage string) *Outcome {
 	return nil
 }
 
+// approve records an accepted unit and moves the cursor on (§5).
+func (e *Engine) approve(stage string, rev int, doc *stageDoc, payload []byte) *Outcome {
+	p := &e.State.Progress
+	switch stage {
+	case StageResearch:
+		p.Approved[StageResearch] = rev
+		e.State.Cursor = run.Cursor{Stage: StageOutline}
+		e.State.Hashes["requirements"] = digest(payload)
+	case StageOutline:
+		p.Approved[StageOutline] = rev
+		p.Accepted = map[string]int{} // a new skeleton resets every detail approval
+		e.State.Cursor = run.Cursor{Stage: StageDetail}
+		e.deriveBudget(len(doc.outline.Steps))
+	case StageDetail:
+		for _, st := range doc.steps.Steps {
+			b, _ := json.Marshal(st)
+			n := e.nextStepRevision(st.ID)
+			if err := e.Run.WriteArtifact(fmt.Sprintf("steps/%s/%d.json", st.ID, n), b); err != nil {
+				return e.fail("write step", err)
+			}
+			p.Accepted[st.ID] = n
+		}
+		e.State.Cursor = run.Cursor{Stage: StageDetail}
+	}
+	return e.checkpoint()
+}
+
 // stageDoc is the parsed planner document of either stage.
 type stageDoc struct {
-	research        *schema.Research
-	outline         *schema.Outline
-	questions       []schema.Question
-	responses       []schema.ResponseToFinding
-	wantsResearch   bool
-	researchReasons []string
+	research    *schema.Research
+	outline     *schema.Outline
+	steps       *schema.StepBatch
+	questions   []schema.Question
+	responses   []schema.ResponseToFinding
+	back        string // research | outline | an accepted step id: approved work the planner asks to change
+	backReasons []string
 }
 
 // check parses the planner document and applies Shogun's mechanical contract checks.
 func (e *Engine) check(stage string, payload []byte) (*stageDoc, []string, error) {
 	d := &stageDoc{}
+	if stage == StageDetail {
+		return e.checkDetail(payload)
+	}
 	if stage == StageResearch {
 		r, err := schema.Parse[schema.Research](schema.KindResearch, payload)
 		if err != nil {
@@ -230,8 +262,8 @@ func (e *Engine) check(stage string, payload []byte) (*stageDoc, []string, error
 	d.outline, d.questions, d.responses = o, o.Questions, o.ResponsesToFindings
 	for _, c := range o.RequestedChanges {
 		if c.TargetID == StageResearch {
-			d.wantsResearch = true
-			d.researchReasons = append(d.researchReasons, "outline planner requests a research change: "+c.Reason)
+			d.back = StageResearch
+			d.backReasons = append(d.backReasons, "outline planner requests a research change: "+c.Reason)
 		}
 	}
 	reqs, err := e.requirements()
@@ -309,6 +341,9 @@ func (e *Engine) checkResearch(r *schema.Research) []string {
 
 // gate is the mechanical part of the stage gate on top of the verdict and the ledger (§6).
 func (e *Engine) gate(stage string, d *stageDoc, rev *schema.Review) []string {
+	if stage == StageDetail {
+		return e.detailGate(d, rev)
+	}
 	var scope schema.CoverageScope
 	if stage == StageResearch {
 		scope = schema.ScopeForRequirements(d.research.Requirements, false)
@@ -342,22 +377,42 @@ func (e *Engine) gate(stage string, d *stageDoc, rev *schema.Review) []string {
 	return notes
 }
 
-// backToResearch returns the work to research. The previous approval stays as the baseline that
-// the new revision is checked against; the outline is redone after the new approval.
-func (e *Engine) backToResearch(notes []string) *Outcome {
-	e.logf("[outline] the approved research must change: back to research")
-	e.State.Progress.GateNotes = notes
-	e.State.Cursor = run.Cursor{Stage: StageResearch}
-	return e.checkpoint()
-}
-
-// relevant are the open findings a stage's gate depends on: its own, plus those an outline review
-// addressed to research.
-func relevant(p *run.Progress, stage string) []run.Finding {
+// relevant are the open findings a unit's gate depends on: those raised on it, those a later
+// review addressed to it (target "research", "outline", or one of the batch's step ids), and, for a
+// detail batch, those raised on any earlier batch that shared a step with it — so splitting or
+// re-cutting a batch never leaves its unresolved findings behind. A finding aimed at one specific
+// step of that earlier batch gates only that step.
+func relevant(p *run.Progress, key string) []run.Finding {
+	targets := map[string]bool{key: true}
+	mine := batchSteps(key)
+	for id := range mine {
+		targets[id] = true
+	}
 	var out []run.Finding
 	for _, f := range openFindings(p) {
-		if f.Stage == stage || (stage == StageResearch && f.TargetID == StageResearch) {
+		parent := batchSteps(f.Stage)
+		shared := false
+		for id := range parent {
+			shared = shared || mine[id]
+		}
+		// A finding addressed to one step of the old batch stays with that step only; a finding on
+		// the batch as a whole (a requirement, a criterion, the batch) follows every part of it.
+		if parent[f.TargetID] && !mine[f.TargetID] {
+			shared = false
+		}
+		if f.Stage == key || targets[f.TargetID] || shared {
 			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// batchSteps are the step ids of a detail unit key ("detail:S-001+S-002"); empty for other keys.
+func batchSteps(key string) map[string]bool {
+	out := map[string]bool{}
+	if ids, ok := strings.CutPrefix(key, StageDetail+":"); ok {
+		for _, id := range strings.Split(ids, "+") {
+			out[id] = true
 		}
 	}
 	return out
@@ -406,15 +461,6 @@ func (e *Engine) webRecords() []inputs.Source {
 		json.Unmarshal(b, &web)
 	}
 	return web
-}
-
-func targetsResearch(p *run.Progress) bool {
-	for _, f := range p.Ledger {
-		if f.Status == "open" && f.Stage == StageOutline && f.TargetID == StageResearch {
-			return true
-		}
-	}
-	return false
 }
 
 // stalemate (§7): two reviews in a row on the same document with the same open blocker/major set,
@@ -486,7 +532,7 @@ func (e *Engine) call(ctx context.Context, role, stage, prompt string, kind sche
 	}
 	req := provider.Request{Dir: dir, Model: spec.Model, Effort: string(spec.Effort), Prompt: prompt, Schema: bundle,
 		Roots: roots, Web: web, Deadline: deadline, MaxAttempts: attempts}
-	e.logf("[%s] %s call %s (%s)…", stage, role, id, spec)
+	e.logf("[%s] %s call %s (%s)…", e.unitKey(), role, id, spec)
 	start := time.Now()
 	res, err := runner.Run(ctx, req)
 	st.Counters.LogicalCalls++
@@ -601,7 +647,7 @@ func fetchWeb(ctx context.Context, runDir string, urls []string) ([]inputs.Sourc
 func (e *Engine) prompt(stage, role string, rev int) (string, error) {
 	p := &e.State.Progress
 	d := promptData{Stage: stage, Role: role, Revision: rev, Lang: e.Cfg.Lang, Task: e.Task,
-		TaskPath: filepath.Join(e.Run.Dir, "task.md"), OpenFindings: relevant(p, stage), GateNotes: p.GateNotes}
+		TaskPath: filepath.Join(e.Run.Dir, "task.md"), OpenFindings: relevant(p, e.unitKey()), GateNotes: p.GateNotes}
 	for _, r := range e.Manifest.Repos {
 		d.Repos = append(d.Repos, repoRef{ID: r.ID, Root: r.Root, Head: r.Head})
 	}
@@ -621,13 +667,19 @@ func (e *Engine) prompt(stage, role string, rev int) (string, error) {
 	}
 	path := func(st string, n int) string { return filepath.Join(e.Run.Dir, st, fmt.Sprintf("%d.json", n)) }
 	if role == "planner" && rev > 1 {
-		d.PrevPath = path(stage, rev-1)
+		d.PrevPath = filepath.Join(e.Run.Dir, e.docRel(rev-1))
 	}
 	if role == "reviewer" {
-		d.DocPath = path(stage, rev)
+		d.DocPath = filepath.Join(e.Run.Dir, e.docRel(rev))
 	}
-	if stage == StageOutline {
+	if stage == StageOutline || stage == StageDetail {
 		d.ResearchPath = path(StageResearch, p.Approved[StageResearch])
+	}
+	if stage == StageDetail {
+		if err := e.detailPromptData(&d, role); err != nil {
+			return "", err
+		}
+		return renderPrompt(stage, role, d)
 	}
 	if role == "reviewer" {
 		var reqs []schema.Requirement

@@ -34,7 +34,12 @@ type promptData struct {
 	PrevPath     string   // planner: its previous revision of this stage
 	DocPath      string   // reviewer: the revision under review
 	ResearchPath string   // outline: the approved research
-	Expected     []string // reviewer: requirement ids that need a coverage row
+	Expected     []string // reviewer: requirement ids (detail: with their criteria) that need a coverage row
+	// detail
+	OutlinePath  string
+	Batch        []stepRef // the steps to detail now
+	Dependencies []stepRef // accepted steps the batch depends on (must read)
+	Accepted     []stepRef // other accepted steps (context, read if needed)
 }
 
 func renderPrompt(stage, role string, d promptData) (string, error) {

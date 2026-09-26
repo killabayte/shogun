@@ -74,16 +74,18 @@ type State struct {
 
 // Progress is the planning pipeline's checkpointed position inside the stages (P3+).
 type Progress struct {
-	Revisions      map[string]int    `json:"revisions"`       // stage -> latest revision written
-	Approved       map[string]int    `json:"approved"`        // stage -> approved revision
-	Rounds         map[string]int    `json:"rounds"`          // stage -> review rounds spent on the unit
-	Stalemate      map[string]string `json:"stalemate"`       // stage -> signature of the previous review round
-	Ledger         []Finding         `json:"ledger"`          // every finding ever raised, with its status
-	NextFinding    int               `json:"next_finding"`    // last assigned F-NNN
-	GateNotes      []string          `json:"gate_notes"`      // mechanical problems carried into the next round
-	Pending        []Pending         `json:"pending"`         // questions waiting for the user
-	NextQuestion   int               `json:"next_question"`   // last assigned Q-NNN
-	QuestionRounds int               `json:"question_rounds"` // question rounds asked so far (max 2)
+	Revisions      map[string]int    `json:"revisions"`            // stage -> latest revision written
+	Approved       map[string]int    `json:"approved"`             // stage -> approved revision
+	Rounds         map[string]int    `json:"rounds"`               // stage -> review rounds spent on the unit
+	Stalemate      map[string]string `json:"stalemate"`            // stage -> signature of the previous review round
+	Ledger         []Finding         `json:"ledger"`               // every finding ever raised, with its status
+	NextFinding    int               `json:"next_finding"`         // last assigned F-NNN
+	GateNotes      []string          `json:"gate_notes"`           // mechanical problems carried into the next round
+	Pending        []Pending         `json:"pending"`              // questions waiting for the user
+	NextQuestion   int               `json:"next_question"`        // last assigned Q-NNN
+	QuestionRounds int               `json:"question_rounds"`      // question rounds asked so far (max 2)
+	Accepted       map[string]int    `json:"accepted"`             // step id -> accepted revision (steps/<id>/<n>.json)
+	BatchSize      int               `json:"batch_size,omitempty"` // detail batch after a context-driven shrink (0 = config)
 }
 
 // Finding is one ledger entry. Only the reviewer closes a finding (resolved|rejected); a finding

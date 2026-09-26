@@ -126,6 +126,68 @@ func disposition(id, status string) map[string]any {
 	return map[string]any{"finding_id": id, "status": status, "reason": "r", "evidence": []string{}}
 }
 
+// stepBatch is a planner detail document for the given outline steps (one verification each).
+func stepBatch(steps ...step) map[string]any {
+	var ss []any
+	for _, st := range steps {
+		reqs := map[string]bool{}
+		var rs []string
+		for _, c := range st.crit {
+			r := strings.SplitN(c, ".", 2)[0]
+			if !reqs[r] {
+				reqs[r] = true
+				rs = append(rs, r)
+			}
+		}
+		ss = append(ss, map[string]any{"id": st.id, "title": "t", "objective": "o", "requirement_ids": rs, "criterion_ids": st.crit,
+			"depends_on": []string{}, "targets": []any{map[string]any{"repo_id": "repo-1", "path": "main.go", "operation": "modify"}},
+			"actions": []string{"edit main.go"}, "verification": []any{map[string]any{"id": "V-001", "repo_id": "repo-1", "method": "command", "expected": "prints the version"}},
+			"risks": []any{}, "rollback_or_why_not_applicable": "revert the commit"})
+	}
+	return map[string]any{"schema_version": 1, "steps": ss, "questions": []any{}, "requested_changes": []any{}, "responses_to_findings": []any{}}
+}
+
+// stepReview approves a detail batch with one coverage row per requirement of its criteria.
+func stepReview(verdict string, findings []map[string]any, steps ...step) map[string]any {
+	crit := map[string][]string{}
+	targets := map[string][]string{}
+	var order []string
+	for _, st := range steps {
+		for _, c := range st.crit {
+			r := strings.SplitN(c, ".", 2)[0]
+			if _, ok := crit[r]; !ok {
+				order = append(order, r)
+			}
+			crit[r] = append(crit[r], c)
+			if !contains(targets[r], st.id) {
+				targets[r] = append(targets[r], st.id)
+			}
+		}
+	}
+	var rows []row
+	for _, r := range order {
+		rows = append(rows, row{r, "covered", crit[r], targets[r]})
+	}
+	d := review(verdict, rows, findings)
+	for i, c := range d["coverage"].([]any) {
+		var refs []string
+		for _, t := range rows[i].targets {
+			refs = append(refs, t+"/V-001")
+		}
+		c.(map[string]any)["verification_refs"] = refs
+	}
+	return d
+}
+
+// details appends an accepting planner/reviewer exchange for each step, one batch per step.
+func details(planner, reviewer []reply, steps ...step) ([]reply, []reply) {
+	for _, st := range steps {
+		planner = append(planner, fixed(stepBatch(st)))
+		reviewer = append(reviewer, fixed(stepReview("approve", nil, st)))
+	}
+	return planner, reviewer
+}
+
 var researchOK = []row{{"R-001", "covered", []string{"R-001.C1"}, []string{"FACT-001"}}}
 var outlineOK = []row{{"R-001", "covered", []string{"R-001.C1"}, []string{"S-001"}}}
 
@@ -156,6 +218,12 @@ func newFixture(t *testing.T, planner, reviewer []reply) *fixture {
 	return f
 }
 
+// thenDetail lets a test that is about research/outline run on through detailing: one accepted
+// batch per step.
+func (f *fixture) thenDetail(steps ...step) {
+	f.planner.replies, f.reviewer.replies = details(f.planner.replies, f.reviewer.replies, steps...)
+}
+
 func (f *fixture) execute(t *testing.T) Outcome {
 	t.Helper()
 	return f.e.Execute(context.Background())
@@ -163,23 +231,23 @@ func (f *fixture) execute(t *testing.T) Outcome {
 
 // ---- tests ----
 
-func TestHappyPathStopsAfterApprovedOutline(t *testing.T) {
-	f := newFixture(t,
-		[]reply{fixed(research(r1)), fixed(outline(step{"S-001", []string{"R-001.C1"}}))},
-		[]reply{fixed(review("approve", researchOK, nil)), fixed(review("approve", outlineOK, nil))})
+func TestHappyPathStopsBeforeIntegration(t *testing.T) {
+	pl, rv := details([]reply{fixed(research(r1)), fixed(outline(step{"S-001", []string{"R-001.C1"}}))},
+		[]reply{fixed(review("approve", researchOK, nil)), fixed(review("approve", outlineOK, nil))}, step{"S-001", []string{"R-001.C1"}})
+	f := newFixture(t, pl, rv)
 	o := f.execute(t)
-	if o.Status != run.StatusPaused || !strings.Contains(o.Reason, "P4") {
+	if o.Status != run.StatusPaused || !strings.Contains(o.Reason, "P5") {
 		t.Fatalf("outcome %+v\n%s", o, f.log.String())
 	}
 	st := f.e.State
-	if st.Cursor.Stage != StageDetail || st.Progress.Approved[StageResearch] != 1 || st.Progress.Approved[StageOutline] != 1 {
+	if st.Cursor.Stage != StageIntegration || st.Progress.Approved[StageResearch] != 1 || st.Progress.Approved[StageOutline] != 1 || st.Progress.Accepted["S-001"] != 1 {
 		t.Fatalf("state %+v", st.Progress)
 	}
 	// C = 2R(B+3) for N=1, k=1, R=6 → 48 logical calls, 144 attempts.
 	if st.Limits.MaxLogicalCalls != 48 || st.Limits.MaxAttempts != 144 || st.Limits.Source != "derived" {
 		t.Fatalf("limits %+v", st.Limits)
 	}
-	if st.Counters.LogicalCalls != 4 || st.Counters.Attempts != 4 || st.Counters.ReviewRounds != 2 {
+	if st.Counters.LogicalCalls != 6 || st.Counters.Attempts != 6 || st.Counters.ReviewRounds != 3 {
 		t.Fatalf("counters %+v", st.Counters)
 	}
 	for _, p := range append(f.planner.prompts, f.reviewer.prompts...) {
@@ -192,8 +260,11 @@ func TestHappyPathStopsAfterApprovedOutline(t *testing.T) {
 			t.Errorf("artifact %s: %v", a, err)
 		}
 	}
+	if _, err := os.Stat(filepath.Join(f.e.Run.Dir, "steps/S-001/1.json")); err != nil {
+		t.Errorf("accepted step not archived: %v", err)
+	}
 	loaded, err := f.e.Run.LoadState()
-	if err != nil || loaded.Cursor.Stage != StageDetail {
+	if err != nil || loaded.Cursor.Stage != StageIntegration {
 		t.Fatalf("checkpoint: %v %+v", err, loaded)
 	}
 }
@@ -204,14 +275,14 @@ func TestHappyPathStopsAfterApprovedOutline(t *testing.T) {
 // CheckOutline and handed back to the planner.
 func TestOutlineStepWithoutCriterionNeverReachesReviewer(t *testing.T) {
 	bad := outline(step{"S-001", []string{"R-001.C1"}}, step{"S-002", []string{"R-009.C1"}})
-	f := newFixture(t,
-		[]reply{fixed(research(r1)), fixed(bad), fixed(outline(step{"S-001", []string{"R-001.C1"}}))},
-		[]reply{fixed(review("approve", researchOK, nil)), fixed(review("approve", outlineOK, nil))})
+	pl, rv := details([]reply{fixed(research(r1)), fixed(bad), fixed(outline(step{"S-001", []string{"R-001.C1"}}))},
+		[]reply{fixed(review("approve", researchOK, nil)), fixed(review("approve", outlineOK, nil))}, step{"S-001", []string{"R-001.C1"}})
+	f := newFixture(t, pl, rv)
 	o := f.execute(t)
-	if o.Status != run.StatusPaused || f.e.State.Cursor.Stage != StageDetail {
+	if o.Status != run.StatusPaused || f.e.State.Cursor.Stage != StageIntegration {
 		t.Fatalf("outcome %+v\n%s", o, f.log.String())
 	}
-	if calls(f.reviewer) != 2 || calls(f.planner) != 3 {
+	if calls(f.reviewer) != 3 || calls(f.planner) != 4 {
 		t.Fatalf("reviewer calls %d (want 2: research + fixed outline), planner %d", calls(f.reviewer), calls(f.planner))
 	}
 	if !strings.Contains(f.planner.prompts[2], "unknown criterion R-009.C1") {
@@ -221,17 +292,18 @@ func TestOutlineStepWithoutCriterionNeverReachesReviewer(t *testing.T) {
 
 // §13 P3: a requirement missing from the registry sends the work back to research.
 func TestMissingRequirementReturnsToResearch(t *testing.T) {
-	f := newFixture(t,
-		[]reply{fixed(research(r1)), fixed(outline(step{"S-001", []string{"R-001.C1"}})),
-			fixed(research(r1, r2)), fixed(outline(step{"S-001", []string{"R-001.C1"}}, step{"S-002", []string{"R-002.C1"}}))},
-		[]reply{
-			fixed(review("approve", researchOK, nil)),
-			fixed(review("revise", outlineOK, []map[string]any{finding("research", "blocker", "the task also requires keeping the API (R-002 missing)")})),
-			fixed(review("approve", []row{{"R-001", "covered", []string{"R-001.C1"}, []string{"FACT-001"}}, {"R-002", "covered", []string{"R-002.C1"}, []string{"FACT-001"}}}, nil, disposition("F-001", "resolved"))),
-			fixed(review("approve", []row{{"R-001", "covered", []string{"R-001.C1"}, []string{"S-001"}}, {"R-002", "covered", []string{"R-002.C1"}, []string{"S-002"}}}, nil)),
-		})
+	pl := []reply{fixed(research(r1)), fixed(outline(step{"S-001", []string{"R-001.C1"}})),
+		fixed(research(r1, r2)), fixed(outline(step{"S-001", []string{"R-001.C1"}}, step{"S-002", []string{"R-002.C1"}}))}
+	rv := []reply{
+		fixed(review("approve", researchOK, nil)),
+		fixed(review("revise", outlineOK, []map[string]any{finding("research", "blocker", "the task also requires keeping the API (R-002 missing)")})),
+		fixed(review("approve", []row{{"R-001", "covered", []string{"R-001.C1"}, []string{"FACT-001"}}, {"R-002", "covered", []string{"R-002.C1"}, []string{"FACT-001"}}}, nil, disposition("F-001", "resolved"))),
+		fixed(review("approve", []row{{"R-001", "covered", []string{"R-001.C1"}, []string{"S-001"}}, {"R-002", "covered", []string{"R-002.C1"}, []string{"S-002"}}}, nil)),
+	}
+	pl, rv = details(pl, rv, step{"S-001", []string{"R-001.C1"}}, step{"S-002", []string{"R-002.C1"}})
+	f := newFixture(t, pl, rv)
 	o := f.execute(t)
-	if o.Status != run.StatusPaused || f.e.State.Cursor.Stage != StageDetail {
+	if o.Status != run.StatusPaused || f.e.State.Cursor.Stage != StageIntegration {
 		t.Fatalf("outcome %+v\n%s", o, f.log.String())
 	}
 	if f.e.State.Progress.Approved[StageResearch] != 2 || !strings.Contains(f.planner.prompts[2], "F-001") {
@@ -267,6 +339,7 @@ func TestDisappearedFindingBlocksApproval(t *testing.T) {
 			fixed(review("approve", researchOK, nil, disposition("F-001", "resolved"))),
 			fixed(review("approve", outlineOK, nil)),
 		})
+	f.thenDetail(step{"S-001", []string{"R-001.C1"}})
 	// Make every planner revision differ so the stalemate rule does not fire.
 	for i := range f.planner.replies[:3] {
 		n := i
@@ -314,6 +387,7 @@ func TestBlockingQuestionNeedsInputThenResume(t *testing.T) {
 	f := newFixture(t,
 		[]reply{fixed(q), fixed(research(r1)), fixed(outline(step{"S-001", []string{"R-001.C1"}}))},
 		[]reply{fixed(review("approve", researchOK, nil)), fixed(review("approve", outlineOK, nil))})
+	f.thenDetail(step{"S-001", []string{"R-001.C1"}})
 	o := f.execute(t)
 	if o.Status != run.StatusNeedsInput || calls(f.reviewer) != 0 {
 		t.Fatalf("outcome %+v, reviewer calls %d", o, calls(f.reviewer))
@@ -332,7 +406,7 @@ func TestBlockingQuestionNeedsInputThenResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	o = f.execute(t)
-	if o.Status != run.StatusPaused || f.e.State.Cursor.Stage != StageDetail {
+	if o.Status != run.StatusPaused || f.e.State.Cursor.Stage != StageIntegration {
 		t.Fatalf("after resume: %+v\n%s", o, f.log.String())
 	}
 	if !strings.Contains(f.planner.prompts[1], "Semver or date? → semver") {
@@ -346,6 +420,7 @@ func TestAutoTakesAssumptionForNonBlockingQuestion(t *testing.T) {
 	q["questions"] = []any{map[string]any{"id": "Q-001", "question": "Flag name?", "why": "w", "impact": "i", "options": []string{}, "proposed_assumption": "--version", "blocking": false}}
 	f := newFixture(t, []reply{fixed(q), fixed(outline(step{"S-001", []string{"R-001.C1"}}))},
 		[]reply{fixed(review("approve", researchOK, nil)), fixed(review("approve", outlineOK, nil))})
+	f.thenDetail(step{"S-001", []string{"R-001.C1"}})
 	if o := f.execute(t); o.Status != run.StatusPaused {
 		t.Fatalf("%+v", o)
 	}

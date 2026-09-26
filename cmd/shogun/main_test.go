@@ -113,7 +113,7 @@ func TestPlanIntakeHappyPathAndStatus(t *testing.T) {
 		t.Errorf("run dir perm %v", fi.Mode())
 	}
 	code, out, _ = runCLI(t, ws, "status", res.RunID)
-	if code != ExitOK || !strings.Contains(out, "status:     paused") || !strings.Contains(out, "stage:      detail") {
+	if code != ExitOK || !strings.Contains(out, "status:     paused") || !strings.Contains(out, "stage:      integration") {
 		t.Fatalf("status: %d %q", code, out)
 	}
 	code, out, _ = runCLI(t, ws, "status", runDir, "--json") // documented order: flags after the id
