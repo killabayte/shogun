@@ -23,7 +23,11 @@ func Bundle(k Kind) ([]byte, error) {
 		return nil, err
 	}
 	doc := out.(map[string]any)
+	// $id and $schema are dropped: the bundle is anonymous, and claude --json-schema rejects the
+	// draft 2020-12 meta-schema URI ("no schema with key or ref", verified live 2026-09-26). The
+	// keywords used ($defs, $ref, anyOf, const, enum, pattern…) validate the same without it.
 	delete(doc, "$id")
+	delete(doc, "$schema")
 	if len(b.defs) > 0 {
 		doc["$defs"] = b.defs
 	}

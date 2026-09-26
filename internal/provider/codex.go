@@ -180,7 +180,7 @@ func parseCodex(stdoutPath, stderrPath, lastPath string, start time.Time, pr pro
 	if err != nil {
 		return nil, fail(ClassPayload, "%v", err)
 	}
-	if err := validatePayload(req.Schema, payload); err != nil {
+	if err := ValidatePayload(req.Schema, payload); err != nil {
 		return nil, fail(ClassPayload, "%v", err)
 	}
 	res.Payload, res.Finish = json.RawMessage(payload), "completed"

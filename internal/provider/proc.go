@@ -185,7 +185,7 @@ func readEvents(path string) (lines [][]byte, truncated bool, err error) {
 
 // reStartupConfig matches the CLIs' own argument/option diagnostics, printed before any session
 // starts (e.g. after a CLI update drops a flag). These are configuration errors: never retried.
-var reStartupConfig = regexp.MustCompile(`(?i)(unknown|unrecognized|unexpected) (option|argument|flag)|invalid value .* for|error: .*(option|argument)`)
+var reStartupConfig = regexp.MustCompile(`(?i)(unknown|unrecognized|unexpected) (option|argument|flag)|invalid value .* for|error: .*(option|argument)|error: --[a-z][a-z-]* is not a valid`)
 
 // startupConfigError reports whether a call that produced no events failed on its arguments.
 func startupConfigError(lines [][]byte, exit int, stderr []byte) bool {

@@ -293,3 +293,12 @@ func TestP2ReviewEventLimitIncludesCompletedLine(t *testing.T) {
 		t.Fatal("event of MaxEventBytes+1 accepted when the last chunk ends in newline")
 	}
 }
+
+// Found live in P3: claude rejects a --json-schema value before any session starts. That is a
+// configuration error and must not be retried.
+func TestClaudeRejectedSchemaIsConfig(t *testing.T) {
+	stderr := []byte(`Error: --json-schema is not a valid JSON Schema: no schema with key or ref "https://json-schema.org/draft/2020-12/schema"` + "\n")
+	if !startupConfigError(nil, 1, stderr) {
+		t.Fatal("argument rejection classified as transport")
+	}
+}

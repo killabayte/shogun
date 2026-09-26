@@ -180,7 +180,7 @@ func parseClaude(stdoutPath, stderrPath string, pr procResult, req Request) (*Re
 	if len(final.StructuredOutput) == 0 || string(final.StructuredOutput) == "null" {
 		return nil, fail(ClassPayload, "result has no structured_output")
 	}
-	if err := validatePayload(req.Schema, final.StructuredOutput); err != nil {
+	if err := ValidatePayload(req.Schema, final.StructuredOutput); err != nil {
 		return nil, fail(ClassPayload, "%v", err)
 	}
 	res.Payload = final.StructuredOutput

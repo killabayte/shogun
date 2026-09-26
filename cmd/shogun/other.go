@@ -10,6 +10,7 @@ import (
 
 	"github.com/killabayte/shogun/internal/config"
 	"github.com/killabayte/shogun/internal/library"
+	"github.com/killabayte/shogun/internal/pipeline"
 	"github.com/killabayte/shogun/internal/planning/schema"
 	"github.com/killabayte/shogun/internal/run"
 )
@@ -43,21 +44,51 @@ func (a *app) cmdResume(args []string) int {
 	if err != nil {
 		return a.errorf("%v", err)
 	}
+	if st.Status == run.StatusApproved {
+		fmt.Fprintf(a.stderr, "[resume] run %s is already approved\n", st.RunID)
+		return ExitOK
+	}
+	var ans *schema.Answers
 	if *answers != "" {
 		data, err := os.ReadFile(*answers)
 		if err != nil {
 			return a.errorf("%v", err)
 		}
-		if _, err := schema.Parse[schema.Answers](schema.KindAnswers, data); err != nil {
+		if ans, err = schema.Parse[schema.Answers](schema.KindAnswers, data); err != nil {
 			return a.errorf("%s: %v", *answers, err)
 		}
 		fmt.Fprintf(a.stderr, "[resume] answers file is valid (%s)\n", *answers)
 	}
-	_ = refresh
-	_ = maxCalls
-	_ = maxTime
-	fmt.Fprintf(a.stderr, "[resume] run %s is %s at %s (generation %d); pipeline resume arrives in P3\n", st.RunID, st.Status, st.Cursor.Stage, st.Generation)
-	return ExitError
+	if *refresh {
+		return a.errorf("--refresh (new generation after input drift) arrives in P5")
+	}
+	cfg, err := config.LoadSnapshot(filepath.Join(dir, "config.snapshot.toml")) // the run's own config (§9)
+	if err != nil {
+		return a.errorf("%v", err)
+	}
+	if ans != nil {
+		if err := a.attachAnswerFiles(dir, ans); err != nil {
+			return a.errorf("%v", err)
+		}
+		if err := pipeline.ApplyAnswers(r, st, ans, a.now()); err != nil {
+			return a.errorf("%s: %v", *answers, err)
+		}
+		fmt.Fprintf(a.stderr, "[resume] %d answer(s) recorded\n", len(ans.Answers))
+	} else if st.Status == run.StatusNeedsInput && len(st.Progress.Pending) > 0 && !a.interactive {
+		return a.errorf("run %s needs answers: shogun resume %s --answers answers.json (questions in %s)", st.RunID, st.RunID, filepath.Join(dir, "questions.json"))
+	}
+	// Raising a limit is an explicit, recorded decision; it never lowers spend counters.
+	if *maxCalls > 0 {
+		st.Limits.MaxAttempts, st.Limits.Source = *maxCalls, "flag"
+	}
+	if *maxTime > 0 {
+		st.Limits.MaxActiveSeconds = maxTime.Seconds()
+	}
+	if err := r.SaveState(st, a.now()); err != nil {
+		return a.errorf("%v", err)
+	}
+	fmt.Fprintf(a.stderr, "[resume] run %s at %s (generation %d)\n", st.RunID, st.Cursor.Stage, st.Generation)
+	return a.runPipeline(r, st, *cfg, !a.interactive, false)
 }
 
 func (a *app) cmdStatus(args []string) int {

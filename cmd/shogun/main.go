@@ -13,6 +13,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/killabayte/shogun/internal/config"
+	"github.com/killabayte/shogun/internal/provider"
 )
 
 // Exit codes (plan §3).
@@ -28,6 +31,15 @@ const version = "0.1.0-dev"
 
 // getwd is a hook for tests.
 var getwd = os.Getwd
+
+// runnersHook replaces the real, preflight-checked model runners in tests.
+var runnersHook func(ctx context.Context, cfg config.Config) (provider.Runner, provider.Runner, error)
+
+// stdin and interactive are hooks for tests: questions are asked only on a terminal.
+var (
+	stdin       io.Reader = os.Stdin
+	interactive           = func() bool { fi, err := os.Stdin.Stat(); return err == nil && fi.Mode()&os.ModeCharDevice != 0 }
+)
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -73,7 +85,8 @@ func dispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		fmt.Fprintln(stderr, "error:", err)
 		return ExitError
 	}
-	app := &app{ctx: ctx, cwd: cwd, stdout: stdout, stderr: stderr, getenv: os.Getenv, now: time.Now}
+	app := &app{ctx: ctx, cwd: cwd, stdout: stdout, stderr: stderr, getenv: os.Getenv, now: time.Now,
+		stdin: stdin, interactive: interactive(), newRunners: runnersHook}
 	switch args[0] {
 	case "plan":
 		return app.cmdPlan(args[1:])
@@ -103,12 +116,15 @@ func dispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 }
 
 type app struct {
-	ctx    context.Context
-	cwd    string
-	stdout io.Writer
-	stderr io.Writer
-	getenv func(string) string
-	now    func() time.Time
+	ctx         context.Context
+	cwd         string
+	stdout      io.Writer
+	stderr      io.Writer
+	getenv      func(string) string
+	now         func() time.Time
+	stdin       io.Reader
+	interactive bool
+	newRunners  func(ctx context.Context, cfg config.Config) (provider.Runner, provider.Runner, error)
 }
 
 func (a *app) errorf(format string, args ...any) int {

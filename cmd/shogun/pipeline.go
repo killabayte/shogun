@@ -1,0 +1,179 @@
+package main
+
+import (
+	"bufio"
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/killabayte/shogun/internal/config"
+	"github.com/killabayte/shogun/internal/inputs"
+	"github.com/killabayte/shogun/internal/pipeline"
+	"github.com/killabayte/shogun/internal/planning/schema"
+	"github.com/killabayte/shogun/internal/provider"
+	"github.com/killabayte/shogun/internal/run"
+)
+
+// runners returns the planner and reviewer for cfg after checking that the config preflight
+// certifies exactly this configuration (§8). Tests replace it.
+func (a *app) runners(ctx context.Context, cfg config.Config) (provider.Runner, provider.Runner, error) {
+	if a.newRunners != nil {
+		return a.newRunners(ctx, cfg)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	claudePath, claudeVer, err := resolveBinary(ctx, cfg.ClaudeCommand)
+	if err != nil {
+		return nil, nil, fmt.Errorf("claude: %v", err)
+	}
+	codexPath, codexVer, err := resolveBinary(ctx, cfg.CodexCommand)
+	if err != nil {
+		return nil, nil, fmt.Errorf("codex: %v (set codex_command)", err)
+	}
+	features, _, err := checkCodexFeatures(ctx, codexPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	fp := provider.Fingerprint(preflightItems(cfg, claudePath, claudeVer, codexPath, codexVer, features, a.getenv))
+	rec, err := provider.LoadPreflight(filepath.Join(a.cwd, ".shogun", "preflight.json"))
+	if err == nil {
+		err = rec.Verify(fp)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	return &provider.Claude{Bin: claudePath}, &provider.Codex{Bin: codexPath}, nil
+}
+
+// runPipeline executes the stages for an opened, locked run and maps the outcome to an exit code.
+func (a *app) runPipeline(r *run.Run, st *run.State, cfg config.Config, auto, asJSON bool) int {
+	man, err := inputs.Load(filepath.Join(r.Dir, "manifest.json"))
+	if err != nil {
+		return a.errorf("%v", err)
+	}
+	task := string(mustReadFile(filepath.Join(r.Dir, "task.md")))
+	if missing := pipeline.UnavailableInputs(man); len(missing) > 0 {
+		st.Status, st.Reason = run.StatusNeedsInput, pipeline.MissingInputsReason(missing)
+		_ = r.SaveState(st, a.now())
+		fmt.Fprintf(a.stderr, "run %s → needs_input: %s\n", st.RunID, st.Reason)
+		return ExitNeedsInput
+	}
+	planner, reviewer, err := a.runners(a.ctx, cfg)
+	if err != nil {
+		st.Status, st.Reason = run.StatusFailed, "preflight: "+err.Error()
+		_ = r.SaveState(st, a.now())
+		if asJSON {
+			fmt.Fprintf(a.stdout, `{"run_id":%q,"status":%q,"path":"","reason":%q}`+"\n", st.RunID, st.Status, st.Reason)
+		}
+		return a.errorf("%v", err)
+	}
+	e := &pipeline.Engine{Run: r, State: st, Manifest: man, Task: task, Cfg: cfg, Planner: planner, Reviewer: reviewer,
+		Log: a.stderr, Now: a.now}
+	if !auto {
+		e.Asker = &terminalAsker{in: bufio.NewReader(a.stdin), out: a.stderr}
+	}
+	o := e.Execute(a.ctx)
+	code := ExitError
+	switch {
+	case o.Status == run.StatusNeedsInput:
+		code = ExitNeedsInput
+		fmt.Fprintf(a.stderr, "answer the questions in %s and run: shogun resume %s --answers answers.json\n", filepath.Join(r.Dir, "questions.json"), st.RunID)
+	case o.Status == run.StatusPaused && strings.HasPrefix(o.Reason, "not_implemented"):
+		code = ExitError
+	case o.Status == run.StatusPaused && strings.HasPrefix(o.Reason, "canceled"):
+		code = ExitInterrupted
+	case o.Status == run.StatusPaused:
+		code = ExitLimit
+	}
+	if asJSON {
+		fmt.Fprintf(a.stdout, `{"run_id":%q,"status":%q,"path":"","reason":%q}`+"\n", st.RunID, o.Status, o.Reason)
+	} else {
+		fmt.Fprintf(a.stderr, "run %s → %s: %s (%s)\n", st.RunID, o.Status, o.Reason, r.Dir)
+	}
+	return code
+}
+
+// terminalAsker shows a batch of questions with the recommendation and reads one line per answer;
+// an empty line accepts the proposed assumption.
+type terminalAsker struct {
+	in  *bufio.Reader
+	out io.Writer
+}
+
+func (t *terminalAsker) Ask(ctx context.Context, qs []run.Pending) (map[string]string, error) {
+	answers := map[string]string{}
+	fmt.Fprintf(t.out, "\n%d question(s) from the %s stage:\n", len(qs), qs[0].Stage)
+	for _, q := range qs {
+		fmt.Fprintf(t.out, "\n%s (%s%s): %s\n  why: %s\n  impact: %s\n", q.ID, q.Origin, map[bool]string{true: ", blocking"}[q.Blocking], q.Question, q.Why, q.Impact)
+		for i, o := range q.Options {
+			fmt.Fprintf(t.out, "  %d) %s\n", i+1, o)
+		}
+		if q.ProposedAssumption != "" {
+			fmt.Fprintf(t.out, "  recommended: %s (press Enter to accept)\n", q.ProposedAssumption)
+		}
+		fmt.Fprint(t.out, "> ")
+		line, err := t.in.ReadString('\n')
+		if err != nil && line == "" {
+			return nil, fmt.Errorf("reading the answer to %s: %v", q.ID, err)
+		}
+		line = strings.TrimSpace(line)
+		if n := optionNumber(line, len(q.Options)); n > 0 {
+			line = q.Options[n-1]
+		}
+		if line == "" { // Enter explicitly accepts the recommendation; without one it stays unanswered
+			line = q.ProposedAssumption
+		}
+		answers[q.ID] = line
+	}
+	return answers, nil
+}
+
+func optionNumber(s string, n int) int {
+	var k int
+	if _, err := fmt.Sscanf(s, "%d", &k); err == nil && fmt.Sprint(k) == s && k >= 1 && k <= n {
+		return k
+	}
+	return 0
+}
+
+func mustReadFile(p string) []byte { b, _ := os.ReadFile(p); return b }
+
+// attachAnswerFiles stores files named in answers.json as new snapshot inputs ans-N (§7) so both
+// models read them like any explicit input. An unavailable file is an error, not a silent skip.
+func (a *app) attachAnswerFiles(runDir string, ans *schema.Answers) error {
+	var files []string
+	for _, x := range ans.Answers {
+		files = append(files, x.Files...)
+	}
+	if len(files) == 0 {
+		return nil
+	}
+	manPath := filepath.Join(runDir, "manifest.json")
+	man, err := inputs.Load(manPath)
+	if err != nil {
+		return err
+	}
+	base := 0
+	for _, s := range man.Inputs {
+		if strings.HasPrefix(s.ID, "ans-") {
+			base++
+		}
+	}
+	sub := fmt.Sprintf("answers-%d", base+1)
+	srcs, err := inputs.NewMaterializer().Materialize(a.ctx, filepath.Join(runDir, sub), a.cwd, files)
+	if err != nil {
+		return fmt.Errorf("answer files: %w", err)
+	}
+	for i := range srcs {
+		srcs[i].ID = fmt.Sprintf("ans-%d", base+i+1)
+		srcs[i].StoredPath = filepath.Join(sub, srcs[i].StoredPath)
+		fmt.Fprintf(a.stderr, "[resume] %s %s → %s\n", srcs[i].ID, srcs[i].Origin, srcs[i].StoredPath)
+	}
+	man.Inputs = append(man.Inputs, srcs...)
+	man.ComputeFingerprint()
+	return man.Save(manPath)
+}

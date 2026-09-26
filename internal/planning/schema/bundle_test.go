@@ -22,6 +22,9 @@ func TestBundleIsSelfContainedAndEquivalent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", k, err)
 		}
+		if bytes.Contains(raw, []byte(`"$schema"`)) {
+			t.Fatalf("%s: bundle keeps $schema, which claude --json-schema rejects", k)
+		}
 		if bytes.Contains(raw, []byte(".schema.json")) {
 			t.Fatalf("%s: bundle still references another file: %s", k, raw)
 		}

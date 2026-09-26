@@ -90,8 +90,9 @@ func TestPlanIntakeHappyPathAndStatus(t *testing.T) {
 	os.WriteFile(filepath.Join(ws, "spec.md"), []byte("# spec\n"), 0o644)
 	os.MkdirAll(filepath.Join(ws, ".shogun"), 0o755)
 	os.WriteFile(filepath.Join(ws, ".shogun", "config.toml"), []byte("project = \"demo\"\n"), 0o644)
+	useFakeModels(t)
 	code, out, errs := runCLI(t, ws, "plan", "Add rate limiting", "--repo", ws, "--repo", repoB, "--input", "spec.md", "--json")
-	if code != ExitError || !strings.Contains(errs, "[intake] complete") && !strings.Contains(out, `"status":"paused"`) {
+	if code != ExitError || !strings.Contains(errs, "[intake] complete") || !strings.Contains(errs, "[outline] approved") {
 		t.Fatalf("intake: code=%d out=%q err=%q", code, out, errs)
 	}
 	var res struct {
@@ -112,7 +113,7 @@ func TestPlanIntakeHappyPathAndStatus(t *testing.T) {
 		t.Errorf("run dir perm %v", fi.Mode())
 	}
 	code, out, _ = runCLI(t, ws, "status", res.RunID)
-	if code != ExitOK || !strings.Contains(out, "status:     paused") || !strings.Contains(out, "stage:      research") {
+	if code != ExitOK || !strings.Contains(out, "status:     paused") || !strings.Contains(out, "stage:      detail") {
 		t.Fatalf("status: %d %q", code, out)
 	}
 	code, out, _ = runCLI(t, ws, "status", runDir, "--json") // documented order: flags after the id
@@ -122,6 +123,19 @@ func TestPlanIntakeHappyPathAndStatus(t *testing.T) {
 	man, _ := os.ReadFile(filepath.Join(runDir, "manifest.json"))
 	if !strings.Contains(string(man), `"repo-2"`) || !strings.Contains(string(man), `"is_git": true`) {
 		t.Fatalf("manifest should contain two git repos: %s", man)
+	}
+}
+
+// Without a certified config preflight no model is called: the run fails with a hint.
+func TestPlanRequiresPreflight(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ws := gitRepo(t)
+	os.MkdirAll(filepath.Join(ws, ".shogun"), 0o755)
+	// A binary that exists but has no preflight record for this configuration.
+	os.WriteFile(filepath.Join(ws, ".shogun", "config.toml"), []byte("claude_command = \"/bin/echo\"\ncodex_command = \"/bin/echo\"\n"), 0o644)
+	code, _, errs := runCLI(t, ws, "plan", "Task")
+	if code != ExitError || !strings.Contains(errs, "doctor --live") {
+		t.Fatalf("plan without preflight: %d %q", code, errs)
 	}
 }
 

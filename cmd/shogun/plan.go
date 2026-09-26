@@ -13,8 +13,8 @@ import (
 	"github.com/killabayte/shogun/internal/run"
 )
 
-// cmdPlan performs intake (P1): validates config, creates the run dir, snapshots repos and inputs,
-// writes task/config/manifest/state. The research stage is wired in P3.
+// cmdPlan performs intake (validates config, creates the run dir, snapshots repos and inputs,
+// writes task/config/manifest/state) and then runs the planning stages.
 func (a *app) cmdPlan(args []string) int {
 	fs := a.newFlagSet("plan")
 	var repos, ins multiFlag
@@ -118,20 +118,13 @@ func (a *app) cmdPlan(args []string) int {
 		return fail(ExitError, "inputs", inErr)
 	}
 	st.Cursor = run.Cursor{Stage: "research"}
-	st.Status = run.StatusPaused
-	st.Reason = "not_implemented: research/outline/detail/integration stages arrive in P3–P5"
+	st.Status = run.StatusRunning
 	if err := r.SaveState(st, a.now()); err != nil {
 		return a.errorf("%v", err)
 	}
-	_ = out
-	_ = auto
-	if *asJSON {
-		fmt.Fprintf(a.stdout, `{"run_id":%q,"status":%q,"path":"","reason":%q}`+"\n", id, st.Status, st.Reason)
-	} else {
-		fmt.Fprintf(a.stderr, "[intake] complete: %s\n", r.Dir)
-		fmt.Fprintf(a.stderr, "pipeline stages are not implemented yet (P1 skeleton); run is paused at %s\n", st.Cursor.Stage)
-	}
-	return ExitError
+	fmt.Fprintf(a.stderr, "[intake] complete: %s\n", r.Dir)
+	_ = out // used by publication (P5)
+	return a.runPipeline(r, st, cfg, *auto || !a.interactive, *asJSON)
 }
 
 // readTask returns the task text from exactly one source: positional text or --task-file.

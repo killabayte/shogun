@@ -33,6 +33,9 @@ type Request struct {
 	Roots    []string  // readable roots; Roots[0] is the working directory
 	Web      bool      // research only: allow web fetch/search
 	Deadline time.Time // hard deadline for all attempts together
+	// MaxAttempts caps physical attempts for this call (0 = MaxAttempts); the caller passes what is
+	// left of its budget so retries never spend past an explicit limit.
+	MaxAttempts int
 }
 
 // Reported is what the CLI said it actually used.
@@ -75,6 +78,9 @@ type Error struct {
 	Msg      string
 	Attempts int
 	Dir      string // directory of the last attempt
+	// BudgetStopped: the retry or format correction the policy allows was not attempted because
+	// Request.MaxAttempts ran out (the caller's budget, not the failure itself, ended the call).
+	BudgetStopped bool
 }
 
 func (e *Error) Error() string { return fmt.Sprintf("%s: %s", e.Class, e.Msg) }
@@ -104,7 +110,11 @@ func runAttempts(ctx context.Context, req Request, attempt attemptFunc) (*Result
 	}
 	correction, corrected := "", false
 	var last *Error
-	for n := 1; n <= MaxAttempts; n++ {
+	limit := MaxAttempts
+	if req.MaxAttempts > 0 && req.MaxAttempts < limit {
+		limit = req.MaxAttempts
+	}
+	for n := 1; n <= limit; n++ {
 		if c := ctxClass(ctx); c != "" {
 			return nil, &Error{Class: c, Msg: "no attempt started: " + ctx.Err().Error(), Attempts: n - 1, Dir: dirOf(last)}
 		}
@@ -123,16 +133,17 @@ func runAttempts(ctx context.Context, req Request, attempt attemptFunc) (*Result
 		}
 		err.Attempts, err.Dir = n, dir
 		last = err
-		switch err.Class {
-		case ClassTransport:
-			continue
-		case ClassPayload:
-			if !corrected {
-				corrected, correction = true, err.Msg
-				continue
-			}
+		retry := err.Class == ClassTransport || (err.Class == ClassPayload && !corrected)
+		if !retry {
+			return nil, err
 		}
-		return nil, err
+		if n == limit && limit < MaxAttempts {
+			err.BudgetStopped = true
+			return nil, err
+		}
+		if err.Class == ClassPayload {
+			corrected, correction = true, err.Msg
+		}
 	}
 	return nil, last
 }
@@ -160,8 +171,8 @@ func correctionNote(msg string) string {
 		"\nReturn only a document that satisfies the output schema.\n"
 }
 
-// validatePayload checks payload against a self-contained schema.
-func validatePayload(schemaDoc, payload []byte) error {
+// ValidatePayload checks payload against a self-contained schema (the adapters apply it to every answer).
+func ValidatePayload(schemaDoc, payload []byte) error {
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(schemaDoc))
 	if err != nil {
 		return fmt.Errorf("output schema: %w", err)

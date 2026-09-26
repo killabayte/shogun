@@ -67,8 +67,53 @@ type State struct {
 	Counters   Counters          `json:"counters"`
 	Limits     Limits            `json:"limits"`
 	Hashes     map[string]string `json:"hashes,omitempty"` // manifest, requirements revision, candidate…
+	Progress   Progress          `json:"progress"`
 	CreatedAt  string            `json:"created_at"`
 	UpdatedAt  string            `json:"updated_at"`
+}
+
+// Progress is the planning pipeline's checkpointed position inside the stages (P3+).
+type Progress struct {
+	Revisions      map[string]int    `json:"revisions"`       // stage -> latest revision written
+	Approved       map[string]int    `json:"approved"`        // stage -> approved revision
+	Rounds         map[string]int    `json:"rounds"`          // stage -> review rounds spent on the unit
+	Stalemate      map[string]string `json:"stalemate"`       // stage -> signature of the previous review round
+	Ledger         []Finding         `json:"ledger"`          // every finding ever raised, with its status
+	NextFinding    int               `json:"next_finding"`    // last assigned F-NNN
+	GateNotes      []string          `json:"gate_notes"`      // mechanical problems carried into the next round
+	Pending        []Pending         `json:"pending"`         // questions waiting for the user
+	NextQuestion   int               `json:"next_question"`   // last assigned Q-NNN
+	QuestionRounds int               `json:"question_rounds"` // question rounds asked so far (max 2)
+}
+
+// Finding is one ledger entry. Only the reviewer closes a finding (resolved|rejected); a finding
+// missing from a later review stays open.
+type Finding struct {
+	ID              string   `json:"id"`
+	Stage           string   `json:"stage"`
+	Severity        string   `json:"severity"`
+	TargetID        string   `json:"target_id"`
+	Problem         string   `json:"problem"`
+	RequestedChange string   `json:"requested_change"`
+	Evidence        []string `json:"evidence"`
+	Status          string   `json:"status"` // open | resolved | rejected
+	OpenedIn        string   `json:"opened_in"`
+	ClosedIn        string   `json:"closed_in,omitempty"`
+	Reason          string   `json:"reason,omitempty"`
+	Disputes        int      `json:"disputes,omitempty"` // planner disputes that left the finding open
+}
+
+// Pending is a question Shogun has not got an answer for yet. ID is assigned by Shogun.
+type Pending struct {
+	ID                 string   `json:"id"`
+	Stage              string   `json:"stage"`
+	Origin             string   `json:"origin"` // planner | reviewer | shogun
+	Question           string   `json:"question"`
+	Why                string   `json:"why"`
+	Impact             string   `json:"impact"`
+	Options            []string `json:"options"`
+	ProposedAssumption string   `json:"proposed_assumption"`
+	Blocking           bool     `json:"blocking"`
 }
 
 // Run is an opened run directory. Hold the lock for the whole lifetime of a writer.
