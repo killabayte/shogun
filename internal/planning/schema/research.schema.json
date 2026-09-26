@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "research.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "facts", "requirements", "source_coverage", "questions", "web_sources", "requested_changes", "responses_to_findings"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "facts": {
+      "type": "array",
+      "items": {"type": "object", "additionalProperties": false,
+        "required": ["id", "source_id", "location", "quote", "kind", "text"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^FACT-[0-9]{3,}$"},
+          "source_id": {"$ref": "common.schema.json#/$defs/nonempty"},
+          "location": {"type": "string"},
+          "quote": {"type": "string", "maxLength": 600},
+          "kind": {"type": "string", "enum": ["observation", "assumption"]},
+          "text": {"$ref": "common.schema.json#/$defs/nonempty"}
+        }}
+    },
+    "requirements": {"$ref": "requirements.schema.json#/properties/requirements"},
+    "source_coverage": {
+      "type": "array",
+      "items": {"type": "object", "additionalProperties": false,
+        "required": ["source_id", "studied", "relevance", "notes"],
+        "properties": {
+          "source_id": {"$ref": "common.schema.json#/$defs/nonempty"},
+          "studied": {"type": "string"},
+          "relevance": {"type": "string", "enum": ["relevant", "irrelevant", "partial"]},
+          "notes": {"type": "string"}
+        }}
+    },
+    "questions": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/question"}},
+    "web_sources": {
+      "type": "array",
+      "items": {"type": "object", "additionalProperties": false,
+        "required": ["url", "role", "related_ids"],
+        "properties": {
+          "url": {"type": "string", "pattern": "^https?://"},
+          "role": {"type": "string", "enum": ["essential", "supporting"]},
+          "related_ids": {"type": "array", "items": {"type": "string"}}
+        }}
+    },
+    "requested_changes": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/requested_change"}},
+    "responses_to_findings": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/response_to_finding"}}
+  }
+}

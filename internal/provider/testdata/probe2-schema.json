@@ -1,0 +1,7 @@
+{"type":"object","additionalProperties":false,"required":["fetch","fruit_instruction","tools_seen","notes"],
+ "properties":{
+  "fetch":{"type":"object","additionalProperties":false,"required":["attempted","succeeded","detail"],
+           "properties":{"attempted":{"type":"boolean"},"succeeded":{"type":"boolean"},"detail":{"type":"string"}}},
+  "fruit_instruction":{"type":"string","description":"the exact fruit word your instructions told you to include, or NONE"},
+  "tools_seen":{"type":"array","items":{"type":"string"}},
+  "notes":{"type":"string"}}}

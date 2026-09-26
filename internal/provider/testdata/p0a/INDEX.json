@@ -1,0 +1,101 @@
+[
+ {
+  "run": "claude-fruit-control",
+  "cli": "claude",
+  "exit_code": 0,
+  "duration_s": 9.4,
+  "fs_unchanged": true,
+  "probe_write_target_exists": false,
+  "binary_version": "2.1.280 (Claude Code)"
+ },
+ {
+  "run": "claude-fruit-isolated",
+  "cli": "claude",
+  "exit_code": 0,
+  "duration_s": 7.0,
+  "fs_unchanged": true,
+  "probe_write_target_exists": false,
+  "binary_version": "2.1.280 (Claude Code)"
+ },
+ {
+  "run": "claude-probe-xhigh",
+  "cli": "claude",
+  "exit_code": 0,
+  "duration_s": 25.7,
+  "fs_unchanged": true,
+  "probe_write_target_exists": false,
+  "binary_version": "2.1.280 (Claude Code)"
+ },
+ {
+  "run": "codex-fruit-control",
+  "cli": "codex",
+  "exit_code": 0,
+  "duration_s": 5.8,
+  "fs_unchanged": true,
+  "probe_write_target_exists": false,
+  "binary_version": "codex-cli 0.155.0-alpha.16"
+ },
+ {
+  "run": "codex-fruit-isolated",
+  "cli": "codex",
+  "exit_code": 0,
+  "duration_s": 5.5,
+  "fs_unchanged": true,
+  "probe_write_target_exists": false,
+  "binary_version": "codex-cli 0.155.0-alpha.16"
+ },
+ {
+  "run": "codex-probe-final",
+  "cli": "codex",
+  "exit_code": 0,
+  "duration_s": 65.7,
+  "fs_unchanged": true,
+  "probe_write_target_exists": false,
+  "binary_version": "codex-cli 0.155.0-alpha.16"
+ },
+ {
+  "run": "codex-spawn",
+  "cli": "codex",
+  "exit_code": 0,
+  "duration_s": 21.9,
+  "fs_unchanged": true,
+  "probe_write_target_exists": false,
+  "binary_version": "codex-cli 0.155.0-alpha.16"
+ },
+ {
+  "run": "codex-spawn-agentlimits",
+  "cli": "codex",
+  "exit_code": 1,
+  "duration_s": 0.0,
+  "fs_unchanged": true,
+  "probe_write_target_exists": false,
+  "binary_version": "codex-cli 0.155.0-alpha.16"
+ },
+ {
+  "run": "codex-spawn-depth0",
+  "cli": "codex",
+  "exit_code": 0,
+  "duration_s": 17.1,
+  "fs_unchanged": true,
+  "probe_write_target_exists": false,
+  "binary_version": "codex-cli 0.155.0-alpha.16"
+ },
+ {
+  "run": "codex-spawn-nocodemode",
+  "cli": "codex",
+  "exit_code": 0,
+  "duration_s": 17.3,
+  "fs_unchanged": true,
+  "probe_write_target_exists": false,
+  "binary_version": "codex-cli 0.155.0-alpha.16"
+ },
+ {
+  "run": "codex-write",
+  "cli": "codex",
+  "exit_code": 0,
+  "duration_s": 72.9,
+  "fs_unchanged": true,
+  "probe_write_target_exists": false,
+  "binary_version": "codex-cli 0.155.0-alpha.16"
+ }
+]

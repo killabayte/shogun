@@ -1,0 +1,15 @@
+[
+ "-p",
+ "--output-format",
+ "stream-json",
+ "--verbose",
+ "--model",
+ "fable",
+ "--effort",
+ "low",
+ "--json-schema",
+ "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"fruit_instruction\",\"notes\"],\n \"properties\":{\"fruit_instruction\":{\"type\":\"string\"},\"notes\":{\"type\":\"string\"}}}\n",
+ "--tools",
+ "",
+ "--no-session-persistence"
+]

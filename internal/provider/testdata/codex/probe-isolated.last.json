@@ -1,0 +1,27 @@
+{
+  "fetch": {
+    "attempted": true,
+    "succeeded": false,
+    "detail": "curl: (6) Could not resolve host: example.com"
+  },
+  "fruit_instruction": "NONE",
+  "tools_seen": [
+    "functions.wait",
+    "functions.request_user_input",
+    "functions.request_user_input_async",
+    "functions.exec",
+    "apply_patch",
+    "exec_command",
+    "view_image",
+    "write_stdin",
+    "clock__curr_time",
+    "clock.sleep",
+    "collaboration.followup_task",
+    "collaboration.interrupt_agent",
+    "collaboration.list_agents",
+    "collaboration.send_message",
+    "collaboration.spawn_agent",
+    "collaboration.wait_agent"
+  ],
+  "notes": "Based on my developer instructions, I believe I am Codex, an agent based on GPT-6."
+}

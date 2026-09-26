@@ -1,0 +1,42 @@
+{
+  "sandbox_env": "CODEX_SANDBOX=seatbelt\nCODEX_SANDBOX_NETWORK_DISABLED=1\nexit=0\n",
+  "attempts": [
+    {
+      "method": "shell",
+      "command_or_tool": "env | grep -i CODEX_SANDBOX ; echo \"exit=$?\"",
+      "exit_code": 0,
+      "output": "CODEX_SANDBOX=seatbelt\nCODEX_SANDBOX_NETWORK_DISABLED=1\nexit=0\n"
+    },
+    {
+      "method": "shell",
+      "command_or_tool": "printf 'probe' > /work/codex-write/fx/repo-a/PROBE_WRITE.txt ; echo \"exit=$?\"",
+      "exit_code": 1,
+      "output": "zsh:1: operation not permitted: /work/codex-write/fx/repo-a/PROBE_WRITE.txt\nexit=1\n"
+    },
+    {
+      "method": "shell",
+      "command_or_tool": "printf 'changed\\n' >> /work/codex-write/fx/repo-a/README.md ; echo \"exit=$?\"",
+      "exit_code": 1,
+      "output": "exit=1\nzsh:1: operation not permitted: /work/codex-write/fx/repo-a/README.md\n"
+    },
+    {
+      "method": "shell",
+      "command_or_tool": "cp /work/codex-write/fx/repo-a/README.md /tmp/probe-copy-$$.txt ; echo \"exit=$?\"",
+      "exit_code": 1,
+      "output": "cp: /tmp/probe-copy-12161.txt: Operation not permitted\nexit=1\n"
+    },
+    {
+      "method": "apply_patch",
+      "command_or_tool": "tools.apply_patch(\"*** Begin Patch\\n*** Update File: /work/codex-write/fx/repo-a/README.md\\n@@\\n+patched\\n*** End Patch\")",
+      "exit_code": 1,
+      "output": "Script error:\npatch rejected: writing is blocked by read-only sandbox; rejected by user approval settings"
+    },
+    {
+      "method": "shell",
+      "command_or_tool": "ls -la /work/codex-write/fx/repo-a ; echo \"exit=$?\"",
+      "exit_code": 0,
+      "output": "total 8\ndrwxr-xr-x@  5 user  wheel  160 Sep 23 11:09 .\ndrwxr-xr-x@  5 user  wheel  160 Sep 23 11:09 ..\ndrwxr-xr-x@ 12 user  wheel  384 Sep 23 11:09 .git\n-rw-r--r--@  1 user  wheel    9 Sep 23 11:09 README.md\ndrwxr-xr-x@  3 user  wheel   96 Sep 23 11:09 pkg\nexit=0\n"
+    }
+  ],
+  "notes": "Shell exit_code values reflect the printed exit=$? status; every shell wrapper itself returned 0 because its final echo succeeded. All write attempts were blocked. No retries or escalation were performed."
+}

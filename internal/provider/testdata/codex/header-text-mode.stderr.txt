@@ -1,0 +1,18 @@
+Reading additional input from stdin...
+OpenAI Codex v0.155.0-alpha.16
+--------
+workdir: /work/p0/v/codex-header
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: high
+reasoning summaries: none
+session id: 01a0cd55-8422-7571-89e6-1054342ef164
+--------
+user
+Reply with exactly the single word: pong
+codex
+pong
+tokens used
+13,053

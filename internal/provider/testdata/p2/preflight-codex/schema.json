@@ -1,0 +1,4 @@
+{"type":"object","additionalProperties":false,"required":["codewords","write_attempted","write_succeeded","spawn_available","notes"],
+"properties":{"codewords":{"type":"object","additionalProperties":false,"required":["repo_a","repo_b","input"],
+"properties":{"repo_a":{"type":"string"},"repo_b":{"type":"string"},"input":{"type":"string"}}},
+"write_attempted":{"type":"boolean"},"write_succeeded":{"type":"boolean"},"spawn_available":{"type":"boolean"},"notes":{"type":"string"}}}

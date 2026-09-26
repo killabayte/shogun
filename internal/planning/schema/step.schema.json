@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "step.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "steps", "questions", "requested_changes", "responses_to_findings"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "steps": {
+      "type": "array", "minItems": 1,
+      "items": {"type": "object", "additionalProperties": false,
+        "required": ["id", "title", "objective", "requirement_ids", "criterion_ids", "depends_on", "targets", "actions", "verification", "risks", "rollback_or_why_not_applicable"],
+        "properties": {
+          "id": {"$ref": "common.schema.json#/$defs/id_S"},
+          "title": {"$ref": "common.schema.json#/$defs/nonempty"},
+          "objective": {"$ref": "common.schema.json#/$defs/nonempty"},
+          "requirement_ids": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/id_R"}},
+          "criterion_ids": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/id_C"}},
+          "depends_on": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/id_S"}},
+          "targets": {"type": "array", "items": {"type": "object", "additionalProperties": false,
+            "required": ["repo_id", "path", "operation"],
+            "properties": {"repo_id": {"$ref": "common.schema.json#/$defs/nonempty"}, "path": {"$ref": "common.schema.json#/$defs/nonempty"},
+              "operation": {"type": "string", "enum": ["inspect", "create", "modify", "delete"]}}}},
+          "actions": {"type": "array", "minItems": 1, "items": {"$ref": "common.schema.json#/$defs/nonempty"}},
+          "verification": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false,
+            "required": ["id", "repo_id", "method", "expected"],
+            "properties": {"id": {"type": "string", "pattern": "^V-[0-9]{3,}$"}, "repo_id": {"type": "string"},
+              "method": {"type": "string", "enum": ["test", "command", "inspect", "measure"]}, "expected": {"$ref": "common.schema.json#/$defs/nonempty"}}}},
+          "risks": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["risk", "mitigation"],
+            "properties": {"risk": {"$ref": "common.schema.json#/$defs/nonempty"}, "mitigation": {"$ref": "common.schema.json#/$defs/nonempty"}}}},
+          "rollback_or_why_not_applicable": {"$ref": "common.schema.json#/$defs/nonempty"}
+        }}
+    },
+    "questions": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/question"}},
+    "requested_changes": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/requested_change"}},
+    "responses_to_findings": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/response_to_finding"}}
+  }
+}

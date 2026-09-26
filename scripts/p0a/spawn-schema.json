@@ -1,0 +1,3 @@
+{"type":"object","additionalProperties":false,"required":["spawn_tool_available","spawn_attempted","spawn_result","notes"],
+ "properties":{"spawn_tool_available":{"type":"boolean"},"spawn_attempted":{"type":"boolean"},
+  "spawn_result":{"type":"string","description":"verbatim tool response or error"},"notes":{"type":"string"}}}

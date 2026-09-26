@@ -1,0 +1,6 @@
+{"type":"object","additionalProperties":false,"required":["sandbox_env","attempts","notes"],
+ "properties":{
+  "sandbox_env":{"type":"string","description":"verbatim output of the env grep command"},
+  "attempts":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["method","command_or_tool","exit_code","output"],
+     "properties":{"method":{"type":"string"},"command_or_tool":{"type":"string"},"exit_code":{"type":"integer"},"output":{"type":"string"}}}},
+  "notes":{"type":"string"}}}

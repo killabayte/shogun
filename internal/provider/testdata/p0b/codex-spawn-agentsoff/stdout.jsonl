@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"01a0cda1-b18f-7e53-8800-d0c00f76e526"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"{\"spawn_tool_available\":false,\"spawn_attempted\":false,\"spawn_result\":\"No sub-agent spawning tool is callable in this session; none is exposed in the available tool definitions.\" ,\"notes\":\"\"}"}}
+{"type":"turn.completed","usage":{"input_tokens":8149,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":172,"reasoning_output_tokens":119}}

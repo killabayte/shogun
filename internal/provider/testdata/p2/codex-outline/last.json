@@ -1,0 +1,1 @@
+{ "approach": { "alternatives": [], "summary": "Placeholder" }, "final_verification_criterion_ids": [], "questions": [], "requested_changes": [], "responses_to_findings": [], "schema_version": 1, "steps": [{ "criterion_ids": ["R-001.C1"], "deliverable": "Placeholder", "depends_on": [], "id": "S-001", "objective": "Placeholder", "title": "Placeholder" }] }

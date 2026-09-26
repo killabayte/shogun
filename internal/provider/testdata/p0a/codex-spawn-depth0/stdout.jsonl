@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"01a0cd8b-937d-7580-863f-0ee04ab2e0f5"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I’ll call the sub-agent tool once and wait for its reply.\n"}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"{\"spawn_tool_available\":true,\"spawn_attempted\":true,\"spawn_result\":\"collab spawn failed: no thread with id: 01a0cd8b-937d-7580-863f-0ee04ab2e0f5\",\"notes\":\"Spawn failed; no sub-agent result to wait for.\"}"}}
+{"type":"turn.completed","usage":{"input_tokens":19831,"cached_input_tokens":9728,"cache_write_input_tokens":0,"output_tokens":160,"reasoning_output_tokens":30}}
