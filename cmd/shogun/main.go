@@ -29,6 +29,9 @@ const (
 
 const version = "0.1.0-dev"
 
+// revision is set at build time (make build: branch-hash-timestamp); "latest" for plain go build.
+var revision = "latest"
+
 // getwd is a hook for tests.
 var getwd = os.Getwd
 
@@ -103,7 +106,7 @@ func dispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	case "config":
 		return app.cmdConfig(args[1:])
 	case "version", "--version", "-v":
-		fmt.Fprintln(stdout, "shogun", version)
+		fmt.Fprintln(stdout, "shogun", version, revision)
 		return ExitOK
 	case "help", "-h", "--help":
 		usage(stdout)

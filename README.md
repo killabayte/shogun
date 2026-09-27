@@ -55,8 +55,12 @@ Or build from a clone:
 
 ```
 git clone https://github.com/killabayte/shogun.git && cd shogun
-go build ./cmd/shogun
+make build        # produces .bin/shogun
+make install      # and symlinks it to /usr/local/bin/shogun
 ```
+
+`make install` links rather than copies, so a later `make build` is picked up without reinstalling. Override
+the location with `BINDIR` when `/usr/local/bin` is not writable. `make uninstall` removes the link.
 
 shogun drives the model CLIs, so both must be installed and logged in:
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude`) with a subscription and the
@@ -254,9 +258,12 @@ over both.
 ## Development
 
 ```
-go vet ./...
-go test -race ./...
-go build ./cmd/shogun
+make build    # build .bin/shogun with the git revision baked in
+make install  # symlink .bin/shogun into $BINDIR (default /usr/local/bin)
+make test     # race detector plus coverage
+make race     # race detector only
+make lint     # go vet and gofmt, plus golangci-lint when installed
+make fmt      # gofmt, plus goimports when installed
 ```
 
 No test calls a model. The adapters run against a fake CLI (the test binary itself) and against streams

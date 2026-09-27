@@ -19,9 +19,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: vet
-        run: go vet ./...
+      - name: lint
+        run: make lint
       - name: test
-        run: go test -race ./...
+        run: make race
       - name: build
-        run: go build ./cmd/shogun
+        run: make build
