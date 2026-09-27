@@ -124,7 +124,10 @@ func runMode(dir string, st *run.State) string {
 		return st.Mode
 	}
 	// Every run gets empty stage directories at creation; only written drafts tell the mode.
-	has := func(name string) bool { e, err := os.ReadDir(filepath.Join(dir, name)); return err == nil && len(e) > 0 }
+	has := func(name string) bool {
+		e, err := os.ReadDir(filepath.Join(dir, name))
+		return err == nil && len(e) > 0
+	}
 	switch st.Cursor.Stage {
 	case pipeline.StagePlan:
 		return pipeline.ModeFast
