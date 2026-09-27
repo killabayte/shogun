@@ -234,6 +234,7 @@ too. Claude does not report effort, so it is recorded as `unknown`.
 | `shogun resume <run>` | continues a run: `--answers`, `--refresh`, `--max-calls`, `--max-time` |
 | `shogun status <run>` | stage, stop reason, spend and limits; `--json` prints the state |
 | `shogun verify <plan.md>` | `valid` (0), `changed` (1), `unverifiable` (2, receipt missing) or `invalid_format` (2) |
+| `shogun stats` | every run in `.shogun/runs` (stopped and failed too): status, models, attempts, active time, tokens, Claude list-price equivalent; runs without usage are marked `unknown`, unreadable ones `damaged`; `--dir` |
 | `shogun list` | published plans with execution status and integrity; `--dir`, `--status`, `--project` |
 | `shogun doctor` | binaries, versions, config and the preflight certificate; `--live` certifies a model pair |
 | `shogun config` | every effective setting and the layer it came from |
