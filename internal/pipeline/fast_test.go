@@ -188,3 +188,18 @@ func TestFastPathIgnoresDispositionsForUnknownFindings(t *testing.T) {
 		t.Fatalf("%+v\n%s", o, f.log.String())
 	}
 }
+
+// Every reviewer is told what makes a finding blocking: violated requirement, evidence, consequence.
+func TestReviewerPromptsCarryTheMaterialityRule(t *testing.T) {
+	for _, stage := range []string{"plan", "research", "outline", "detail", "integration"} {
+		b, err := promptFiles.ReadFile("prompts/" + stage + ".reviewer.tmpl")
+		if err != nil || !strings.Contains(string(b), `{{template "materiality" .}}`) {
+			t.Errorf("%s reviewer prompt lacks the materiality rule: %v", stage, err)
+		}
+	}
+	f := newFast(t, []reply{fixed(planDoc([]req{r1}, s1))}, []reply{fixed(finalReview("approve", nil, s1))})
+	f.execute(t)
+	if !strings.Contains(f.reviewer.prompts[0], "cannot name all three is minor at most") {
+		t.Fatal("the rendered review prompt lacks the rule")
+	}
+}
