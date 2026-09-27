@@ -27,6 +27,15 @@ type Repo struct {
 	Note            string `json:"note,omitempty"`
 }
 
+// emptySHA256 is the digest of no bytes: an empty diff or no untracked files.
+const emptySHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+// Dirty reports whether a git repository had tracked changes or untracked files. The digests are
+// always set, so it compares them with the digest of nothing rather than checking for presence.
+func (r Repo) Dirty() bool {
+	return (r.DiffSHA256 != "" && r.DiffSHA256 != emptySHA256) || (r.UntrackedSHA256 != "" && r.UntrackedSHA256 != emptySHA256)
+}
+
 // EmptyTree is git's well-known empty tree object (used for unborn HEAD).
 const EmptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 

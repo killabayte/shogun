@@ -174,3 +174,22 @@ func TestRepoManifestUnbornHeadAndNonGit(t *testing.T) {
 		t.Fatal("missing root must error")
 	}
 }
+
+// Live 2026-09-27 (PORTALS-3426): a clean repository was rendered "with local changes" because the
+// digests of an empty diff and of no untracked files are set too.
+func TestDirtyIgnoresEmptyDigests(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "sample.txt"), []byte("one\n"), 0o644)
+	gitInit(t, root)
+	r, err := RepoManifest(context.Background(), "repo-1", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Dirty() {
+		t.Fatalf("clean repository reported dirty: %+v", r)
+	}
+	os.WriteFile(filepath.Join(root, "new.txt"), []byte("x"), 0o644)
+	if r, _ = RepoManifest(context.Background(), "repo-1", root); !r.Dirty() {
+		t.Fatal("untracked file not reported")
+	}
+}
