@@ -153,4 +153,4 @@ go vet ./... && go test -race ./... && go build ./cmd/shogun
 
 The test suite never calls a model. The adapters are tested against a fake CLI (the test binary itself) and against streams recorded from the real CLIs (`internal/provider/testdata/`). Live checks are opt-in: `shogun doctor --live`, or a real `shogun plan`.
 
-Design, decisions and the review history of every stage: [`docs/plans/shogun-v1.md`](docs/plans/shogun-v1.md), [`docs/cli-compatibility.md`](docs/cli-compatibility.md), [`docs/reviews/`](docs/reviews/).
+The design document, the verified CLI contract and the review history are kept outside this repository.

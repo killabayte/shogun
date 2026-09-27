@@ -1,5 +1,5 @@
 // Package provider runs the model CLIs (claude -p, codex exec) as isolated subprocesses under the
-// contract recorded in docs/cli-compatibility.md and turns their streams into a validated Result
+// verified CLI contract (kept with the design documents) and turns their streams into a validated Result
 // or a classified Error. Nothing here decides plan gates; a failed call is never an approval.
 package provider
 
