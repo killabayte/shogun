@@ -612,7 +612,9 @@ func (e *Engine) call(ctx context.Context, role, stage, prompt string, kind sche
 		Roots: roots, Web: web, Deadline: deadline, MaxAttempts: attempts}
 	e.logf("[%s] %s call %s (%s)…", e.unitKey(), role, id, spec)
 	start := time.Now()
+	stopBeat := e.heartbeat(role, dir, attempts)
 	res, err := runner.Run(ctx, req)
+	stopBeat()
 	spent := time.Since(start).Seconds()
 	e.flushActive()
 	st.Counters.LogicalCalls++
