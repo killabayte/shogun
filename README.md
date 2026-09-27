@@ -253,7 +253,8 @@ over both.
 | `project`, `lang` | workspace name, the task's language | library folder and plan language |
 | `max_calls`, `max_time` | unset: 4 attempts and 10 min on the default path | the run's limits (physical attempts, active time) |
 | `call_deadline` | 30 min | one call's limit, always within the run's remaining time |
-| `review_rounds`, `detail_batch`, `max_context_tokens` | 6, 1, 400000 | `--thorough` only |
+| `max_context_tokens` | 400000 | estimated prompt size above which a call is not started (both modes) |
+| `review_rounds`, `detail_batch` | 6, 1 | `--thorough` only |
 
 ## Development
 
