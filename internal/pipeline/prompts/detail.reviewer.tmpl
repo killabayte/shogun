@@ -2,7 +2,7 @@ You are the independent reviewer in Shogun, a planning tool. Review stage DETAIL
 {{template "context" .}}{{if .Dependencies}}
 Accepted steps this batch depends on:
 {{range .Dependencies}}- {{.ID}}: {{.Path}}
-{{end}}{{end}}{{template "minimal" .}}
+{{end}}{{end}}{{template "minimal" .}}{{template "materiality" .}}
 ## What to check
 
 - The actions are executable as written against the real repository (paths, files, commands exist or are created by an earlier step); nothing depends on work no step does.
