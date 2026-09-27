@@ -166,3 +166,25 @@ func TestFastPathReservesTimeForReview(t *testing.T) {
 		t.Fatalf("%+v planner calls %d", o, calls(f.planner))
 	}
 }
+
+// Live 2026-09-27 (demo run): the planner put a criterion both in S-001 and in the end-to-end check;
+// the reviewer cited only S-001's verifications. That is complete evidence and passes at round 1.
+func TestFastPathFinalIsOptionalWhenAStepProvesTheCriterion(t *testing.T) {
+	d := planDoc([]req{r1}, s1)
+	d["final_verification_criterion_ids"] = []string{"R-001.C1"}
+	f := newFast(t, []reply{fixed(d)}, []reply{fixed(finalReview("approve", nil, s1))})
+	if o := f.execute(t); o.Status != run.StatusApproved || f.e.State.Counters.LogicalCalls != 2 {
+		t.Fatalf("%+v calls %d\n%s", o, f.e.State.Counters.LogicalCalls, f.log.String())
+	}
+}
+
+// Live 2026-09-27: the reviewer "resolved" Shogun's gate notes under invented ids F-001…F-004. A
+// disposition for an id that is not open closes nothing and must not block an approval.
+func TestFastPathIgnoresDispositionsForUnknownFindings(t *testing.T) {
+	rev := finalReview("approve", nil, s1)
+	rev["dispositions"] = []any{disposition("F-001", "resolved"), disposition("F-004", "resolved")}
+	f := newFast(t, []reply{fixed(planDoc([]req{r1}, s1))}, []reply{fixed(rev)})
+	if o := f.execute(t); o.Status != run.StatusApproved || f.e.State.Counters.LogicalCalls != 2 {
+		t.Fatalf("%+v\n%s", o, f.log.String())
+	}
+}

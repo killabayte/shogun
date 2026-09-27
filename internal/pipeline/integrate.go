@@ -119,6 +119,7 @@ func (e *Engine) integrationGate(d *planData, rev *schema.Review) []string {
 		}
 		carries[r][who] = true
 	}
+	inStep := map[string]bool{}
 	for _, s := range d.steps {
 		scope.KnownTargets[s.ID] = true
 		for _, v := range s.Verification {
@@ -126,15 +127,31 @@ func (e *Engine) integrationGate(d *planData, rev *schema.Review) []string {
 		}
 		for _, c := range s.CriterionIDs {
 			carry(c, s.ID)
+			inStep[c] = true
 		}
 	}
 	// "final" is evidence only where the plan has an end-to-end check, and only for its criteria.
+	// It must be cited only for a criterion no step carries; for the others it may be cited.
+	allowed := map[string]map[string]bool{}
+	for r, who := range carries {
+		allowed[r] = map[string]bool{}
+		for w := range who {
+			allowed[r][w] = true
+		}
+	}
 	for _, c := range d.outline.FinalVerificationCriterionIDs {
 		scope.KnownTargets["final"], scope.KnownVerifications["final"] = true, true
-		carry(c, "final")
+		r, _, _ := strings.Cut(c, ".")
+		if allowed[r] == nil {
+			allowed[r] = map[string]bool{}
+		}
+		allowed[r]["final"] = true
+		if !inStep[c] {
+			carry(c, "final")
+		}
 	}
 	notes := []string(schema.CoverageGateStrict(rev, scope))
-	notes = append(notes, associations(rev, carries)...)
+	notes = append(notes, associations(rev, carries, allowed)...)
 	for i := range notes {
 		notes[i] = "coverage: " + notes[i]
 	}
@@ -144,17 +161,17 @@ func (e *Engine) integrationGate(d *planData, rev *schema.Review) []string {
 // associations checks that each coverage row cites exactly the evidence its criteria are assigned
 // to: every carrier (a step, or "final" for the end-to-end check) of a requirement is a target with a
 // verification of its own ("S-NNN/V-NNN", or "final"), and nothing else is cited.
-func associations(rev *schema.Review, carries map[string]map[string]bool) []string {
+func associations(rev *schema.Review, carries, allowed map[string]map[string]bool) []string {
 	var notes []string
 	owner := func(ref string) string { s, _, _ := strings.Cut(ref, "/"); return s }
 	for _, c := range rev.Coverage {
 		for _, t := range c.TargetIDs {
-			if !carries[c.RequirementID][t] {
+			if !allowed[c.RequirementID][t] {
 				notes = append(notes, fmt.Sprintf("%s cites %s, which carries none of its criteria", c.RequirementID, t))
 			}
 		}
 		for _, v := range c.VerificationRefs {
-			if !carries[c.RequirementID][owner(v)] {
+			if !allowed[c.RequirementID][owner(v)] {
 				notes = append(notes, fmt.Sprintf("%s cites verification %s of something that carries none of its criteria", c.RequirementID, v))
 			}
 		}

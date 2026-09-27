@@ -23,7 +23,8 @@ func applyReview(p *run.Progress, stage, where string, rev *schema.Review, scope
 	for _, d := range rev.Dispositions {
 		i, ok := byID[d.FindingID]
 		if !ok || p.Ledger[i].Status != "open" {
-			notes = append(notes, fmt.Sprintf("review has a disposition for %s, which is not an open finding", d.FindingID))
+			// A disposition for an id that is not open closes nothing and changes nothing (models
+			// sometimes "resolve" Shogun's gate notes under invented ids): ignore it, never block.
 			continue
 		}
 		addressed[d.FindingID] = true

@@ -222,7 +222,7 @@ func (e *Engine) detailGate(d *stageDoc, rev *schema.Review) []string {
 			carries[r][s.ID] = true
 		}
 	}
-	notes = append(notes, associations(rev, carries)...)
+	notes = append(notes, associations(rev, carries, carries)...)
 	covered := map[string]bool{}
 	for _, c := range rev.Coverage {
 		for _, t := range c.TargetIDs {

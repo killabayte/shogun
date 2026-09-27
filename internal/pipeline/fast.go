@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/killabayte/shogun/internal/planning/schema"
 	"github.com/killabayte/shogun/internal/run"
@@ -34,7 +35,8 @@ func (e *Engine) fast(ctx context.Context) *Outcome {
 			}
 		}
 		if p.Rounds[key] >= FastRounds {
-			return e.stop(run.StatusPaused, fmt.Sprintf("limit: the plan used all %d review rounds with blocking findings open", FastRounds)+e.draftNote())
+			return e.stop(run.StatusPaused, fmt.Sprintf("limit: the plan used all %d review rounds without passing the gate (%d blocking finding(s); last gate notes: %s)",
+				FastRounds, len(blocking(relevant(p, key))), strings.Join(p.GateNotes, "; "))+e.draftNote())
 		}
 		rev := p.Revisions[key] + 1
 		prompt, err := e.prompt(StagePlan, "planner", rev)
