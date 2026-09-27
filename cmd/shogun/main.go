@@ -90,7 +90,7 @@ Usage:
   shogun version
 
 Exit codes: 0 ok · 1 limit/stalemate · 2 config/tool/protocol error · 3 needs input · 130 interrupted
-`, version)
+`, releaseVersion())
 }
 
 func dispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {
