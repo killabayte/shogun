@@ -110,7 +110,11 @@ shogun plan --task-file task.md \
 ```
 
 On success shogun prints the path of the published plan and exits 0. Progress, the spend after each call and
-the reason for any stop go to stderr.
+the reason for any stop go to stderr. While a model call runs, a line every 30 seconds shows that it is alive:
+
+```
+  … planner working 1m30s, attempt 1/3 of this call; 7.9 of 10 min active left; last CLI output 4s ago
+```
 
 ## How it works
 
