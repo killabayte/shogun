@@ -211,3 +211,13 @@ func TestListAndVerify(t *testing.T) {
 		t.Fatalf("list filter: %d %q", code, out)
 	}
 }
+
+// Only a tag's module version names the release; pseudo-versions and dirty builds keep the default.
+func TestReleaseVersionPattern(t *testing.T) {
+	for v, want := range map[string]bool{"v0.1.0": true, "v0.2.0-rc.1": true, "(devel)": false,
+		"v0.0.0-20260927094013-23bc6f6abcde": false, "v0.1.1-0.20260927094013-23bc6f6abcde": false, "v0.1.0+dirty": false} {
+		if reRelease.MatchString(v) != want {
+			t.Errorf("%s: want %v", v, want)
+		}
+	}
+}

@@ -6,6 +6,8 @@ HASH=$(shell git rev-parse --short=7 HEAD 2>/dev/null)
 TIMESTAMP=$(shell TZ=UTC0 git log -1 --date=format-local:%Y%m%dT%H%M%S --format=%cd HEAD 2>/dev/null)
 GIT_REV=$(shell printf "%s-%s-%s" "$(BRANCH)" "$(HASH)" "$(TIMESTAMP)")
 REV=$(if $(filter --,$(GIT_REV)),latest,$(GIT_REV))
+# an exact release tag (v0.1.0) becomes the version; other builds keep the source default
+VERSION_FLAG=$(if $(filter v%,$(TAG)),-X main.version=$(TAG:v%=%))
 
 # where `make install` links the binary; override for a prefix that needs no privileges
 BINDIR ?= /usr/local/bin
@@ -18,7 +20,7 @@ all: test build
 # running does not rewrite the pages of a live binary (macOS kills such a process).
 build:
 	@mkdir -p .bin
-	go build -ldflags "-X main.revision=$(REV) -s -w" -o .bin/shogun.$(BRANCH) ./cmd/shogun
+	go build -ldflags "-X main.revision=$(REV) $(VERSION_FLAG) -s -w" -o .bin/shogun.$(BRANCH) ./cmd/shogun
 	cp .bin/shogun.$(BRANCH) .bin/shogun.tmp && mv -f .bin/shogun.tmp .bin/shogun
 
 # symlink rather than copy, so every later `make build` is picked up without reinstalling; rm before
