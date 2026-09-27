@@ -1,0 +1,71 @@
+{
+ "coverage": [
+  {
+   "criterion_ids": [
+    "R-001.C1",
+    "R-001.C2",
+    "R-001.C3",
+    "R-001.C4"
+   ],
+   "requirement_id": "R-001",
+   "status": "partial",
+   "target_ids": [
+    "S-001",
+    "S-002"
+   ],
+   "verification_refs": [
+    "S-001/V-001",
+    "S-002/V-003"
+   ]
+  },
+  {
+   "criterion_ids": [
+    "R-002.C1"
+   ],
+   "requirement_id": "R-002",
+   "status": "covered",
+   "target_ids": [
+    "S-001",
+    "S-002"
+   ],
+   "verification_refs": [
+    "S-001/V-002",
+    "S-002/V-003"
+   ]
+  },
+  {
+   "criterion_ids": [
+    "R-003.C1"
+   ],
+   "requirement_id": "R-003",
+   "status": "covered",
+   "target_ids": [
+    "S-001",
+    "S-002"
+   ],
+   "verification_refs": [
+    "S-002/V-003"
+   ]
+  }
+ ],
+ "dispositions": [],
+ "findings": [
+  {
+   "evidence": [
+    "candidate.md:133 omits assertions for per-run reviewer and cache_write_tokens, and for totals' five token sums, cost_usd and usage_incomplete_runs.",
+    "candidate.md:138 nevertheless claims V-003 verifies R-001.C1–C4.",
+    "cmd/shogun/stats.go:103–115 distinguishes damaged-run spend lower bounds from usage lower bounds; the fixture in cmd/shogun/stats_test.go:32–49 always includes both unknown usage and damage."
+   ],
+   "id": null,
+   "problem": "S-002 does not establish R-001.C2 and R-001.C4. Missing or incorrectly mapped JSON token totals and cost would pass every specified assertion. Likewise, setting both lower-bound flags permanently true would pass the sole fixture.",
+   "requested_change": "Extend S-002 to assert the omitted required fields and exact token/cost totals, including presence of zero-valued fields. Add focused cases with complete usage and with incomplete or unknown usage but no damaged runs, verifying the distinct lower-bound flags.",
+   "severity": "major",
+   "target_id": "S-002"
+  }
+ ],
+ "questions": [],
+ "schema_version": 1,
+ "source_assessments": [],
+ "summary": "The implementation approach matches the task and cited sources, but the planned checks leave required JSON totals and lower-bound behavior unverified.",
+ "verdict": "revise"
+}

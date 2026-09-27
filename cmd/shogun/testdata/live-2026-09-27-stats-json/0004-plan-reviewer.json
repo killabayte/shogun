@@ -1,0 +1,69 @@
+{
+ "coverage": [
+  {
+   "criterion_ids": [
+    "R-001.C1",
+    "R-001.C2",
+    "R-001.C3",
+    "R-001.C4"
+   ],
+   "requirement_id": "R-001",
+   "status": "covered",
+   "target_ids": [
+    "S-001",
+    "S-002"
+   ],
+   "verification_refs": [
+    "S-002/V-003",
+    "S-002/V-004"
+   ]
+  },
+  {
+   "criterion_ids": [
+    "R-002.C1"
+   ],
+   "requirement_id": "R-002",
+   "status": "covered",
+   "target_ids": [
+    "S-001",
+    "S-002"
+   ],
+   "verification_refs": [
+    "S-001/V-002",
+    "S-002/V-003"
+   ]
+  },
+  {
+   "criterion_ids": [
+    "R-003.C1"
+   ],
+   "requirement_id": "R-003",
+   "status": "covered",
+   "target_ids": [
+    "S-002"
+   ],
+   "verification_refs": [
+    "S-002/V-003"
+   ]
+  }
+ ],
+ "dispositions": [
+  {
+   "evidence": [
+    "candidate.md S-002 actions 3–4 specify required run fields, zero-valued keys, and exact token and cost totals.",
+    "candidate.md S-002 action 6 and V-004 cover complete, incomplete-only, and unknown-only usage without damaged runs.",
+    "repo-1:cmd/shogun/stats.go:103–115 confirms the two distinct lower-bound conditions.",
+    "repo-1:cmd/shogun/stats_test.go:32–49 confirms the existing fixture values."
+   ],
+   "finding_id": "F-001",
+   "reason": "The revised verification addresses the omitted assertions and distinguishes both lower-bound flags across the requested cases.",
+   "status": "resolved"
+  }
+ ],
+ "findings": [],
+ "questions": [],
+ "schema_version": 1,
+ "source_assessments": [],
+ "summary": "The plan covers the original task, follows the stated assumptions, and fixes both prior coverage issues. Cited source facts match the repository. No files were changed or planned commands executed.",
+ "verdict": "approve"
+}
