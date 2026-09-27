@@ -144,7 +144,7 @@ func (e *Engine) body(d *planData) string {
 	w("\n## Inputs and versions\n\n")
 	for _, r := range e.Manifest.Repos {
 		state := "clean"
-		if r.DiffSHA256 != "" || r.UntrackedSHA256 != "" {
+		if r.Dirty() {
 			state = "with local changes (fingerprint " + short(r.Fingerprint) + ")"
 		}
 		if r.IsGit {

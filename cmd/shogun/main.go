@@ -10,6 +10,8 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"regexp"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -27,10 +29,23 @@ const (
 	ExitInterrupted = 130
 )
 
-const version = "0.1.0-dev"
+// version is set at build time from an exact release tag (make build on v0.1.0 → "0.1.0"); a build
+// of a tagged module (go install …@v0.1.0) takes it from the module version instead.
+var version = "0.1.0-dev"
 
 // revision is set at build time (make build: branch-hash-timestamp); "latest" for plain go build.
 var revision = "latest"
+
+// reRelease matches a tag's module version (v0.1.0, v0.2.0-rc.1), not a pseudo-version or +dirty.
+var reRelease = regexp.MustCompile(`^v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$`)
+
+// releaseVersion is the build-time version, or the module version of a go install from a tag.
+func releaseVersion() string {
+	if bi, ok := debug.ReadBuildInfo(); ok && version == "0.1.0-dev" && reRelease.MatchString(bi.Main.Version) {
+		return strings.TrimPrefix(bi.Main.Version, "v")
+	}
+	return version
+}
 
 // getwd is a hook for tests.
 var getwd = os.Getwd
@@ -75,7 +90,7 @@ Usage:
   shogun version
 
 Exit codes: 0 ok · 1 limit/stalemate · 2 config/tool/protocol error · 3 needs input · 130 interrupted
-`, version)
+`, releaseVersion())
 }
 
 func dispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -106,7 +121,7 @@ func dispatch(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	case "config":
 		return app.cmdConfig(args[1:])
 	case "version", "--version", "-v":
-		fmt.Fprintln(stdout, "shogun", version, revision)
+		fmt.Fprintln(stdout, "shogun", releaseVersion(), revision)
 		return ExitOK
 	case "help", "-h", "--help":
 		usage(stdout)

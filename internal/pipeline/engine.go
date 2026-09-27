@@ -681,7 +681,7 @@ func addUsages(c *run.Counters, usages []json.RawMessage) {
 }
 
 // addUsage adds one attempt's usage: Claude's modelUsage (per model: uncached input, cache read,
-// cache creation, output, reported cost) or Codex's turn usage (input includes cached input, which
+// cache creation, output, thinking, reported cost) or Codex's turn usage (input includes cached input, which
 // is split out; reasoning is kept separate). It reports whether any usage was found.
 func addUsage(c *run.Counters, raw json.RawMessage) bool {
 	var codex struct {
@@ -700,8 +700,8 @@ func addUsage(c *run.Counters, raw json.RawMessage) bool {
 		return true
 	}
 	var claude map[string]struct {
-		InputTokens, OutputTokens, CacheReadInputTokens, CacheCreationInputTokens int64
-		CostUSD                                                                   float64
+		InputTokens, OutputTokens, CacheReadInputTokens, CacheCreationInputTokens, ThinkingTokens int64
+		CostUSD                                                                                   float64
 	}
 	if json.Unmarshal(raw, &claude) != nil || len(claude) == 0 {
 		return false
@@ -711,6 +711,7 @@ func addUsage(c *run.Counters, raw json.RawMessage) bool {
 		c.CacheReadTokens += m.CacheReadInputTokens
 		c.CacheWriteTokens += m.CacheCreationInputTokens
 		c.OutputTokens += m.OutputTokens
+		c.ReasoningTokens += m.ThinkingTokens // part of output, like Codex's reasoning tokens
 		c.CostUSD += m.CostUSD
 	}
 	return true

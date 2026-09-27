@@ -120,14 +120,14 @@ func (u usageRunner) Run(ctx context.Context, req provider.Request) (*provider.R
 // Every run accounts tokens and Claude's list-price cost, so its spend is visible.
 func TestFastPathRecordsTokensAndCost(t *testing.T) {
 	f := newFast(t, []reply{fixed(planDoc([]req{r1}, s1))}, []reply{fixed(finalReview("approve", nil, s1))})
-	f.e.Planner = usageRunner{`{"claude-opus-5-5":{"inputTokens":1000,"cacheReadInputTokens":9000,"outputTokens":500,"costUSD":0.25}}`, f.planner}
+	f.e.Planner = usageRunner{`{"claude-opus-5-5":{"inputTokens":1000,"cacheReadInputTokens":9000,"outputTokens":500,"thinkingTokens":100,"costUSD":0.25}}`, f.planner}
 	f.e.Reviewer = usageRunner{`{"input_tokens":20000,"output_tokens":300,"reasoning_output_tokens":200}`, f.reviewer}
 	if o := f.execute(t); o.Status != run.StatusApproved {
 		t.Fatalf("%+v", o)
 	}
 	c := f.e.State.Counters
 	// Cache reads and reasoning are kept apart, not folded into input/output.
-	if c.InputTokens != 21000 || c.CacheReadTokens != 9000 || c.OutputTokens != 800 || c.ReasoningTokens != 200 || c.CostUSD != 0.25 || c.UsageIncomplete {
+	if c.InputTokens != 21000 || c.CacheReadTokens != 9000 || c.OutputTokens != 800 || c.ReasoningTokens != 300 || c.CostUSD != 0.25 || c.UsageIncomplete {
 		t.Fatalf("counters %+v", c)
 	}
 }
