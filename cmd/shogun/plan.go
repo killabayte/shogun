@@ -61,6 +61,7 @@ func (a *app) cmdPlan(args []string) int {
 	}
 	defer r.Unlock()
 	st := run.NewState(id, now)
+	st.Mode = pipeline.ModeFast
 	// Fast path (default): one planner and one reviewer attempt, at most one more pair — four physical
 	// attempts in total, retries and format corrections included — within ten minutes of active
 	// time (host work included, waiting for the user excluded) unless --max-calls/--max-time say

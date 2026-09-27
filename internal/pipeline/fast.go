@@ -22,6 +22,9 @@ const StagePlan = "plan"
 // FastRounds caps the fast path's reviews: a draft and at most one revision.
 const FastRounds = 2
 
+// ModeFast is recorded for new fast-path runs; older ones have an empty mode, which also means fast.
+const ModeFast = "fast"
+
 // ModeThorough selects the staged pipeline (research → outline → steps → final review).
 const ModeThorough = "thorough"
 

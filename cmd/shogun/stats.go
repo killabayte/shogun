@@ -10,6 +10,7 @@ import (
 
 	toml "github.com/pelletier/go-toml/v2"
 
+	"github.com/killabayte/shogun/internal/pipeline"
 	"github.com/killabayte/shogun/internal/run"
 )
 
@@ -99,7 +100,11 @@ func (a *app) cmdStats(args []string) int {
 	if damaged > 0 {
 		fmt.Fprintf(a.stdout, ", %d damaged", damaged)
 	}
-	fmt.Fprintf(a.stdout, "); %d attempt(s), %.1f min active\n", tot.Attempts, tot.ActiveSeconds/60)
+	spendAtLeast := "" // a damaged run's attempts and time are missing from the totals too
+	if damaged > 0 {
+		spendAtLeast = "at least "
+	}
+	fmt.Fprintf(a.stdout, "); %s%d attempt(s), %s%.1f min active\n", spendAtLeast, tot.Attempts, spendAtLeast, tot.ActiveSeconds/60)
 	atLeast := ""
 	if len(partial) > 0 || damaged > 0 {
 		atLeast = "at least "
@@ -110,6 +115,29 @@ func (a *app) cmdStats(args []string) int {
 		fmt.Fprintf(a.stdout, "not counted: usage incomplete in %d run(s), unknown in %d run(s), %d damaged run(s)\n", partial["incomplete"], partial["unknown"], damaged)
 	}
 	return ExitOK
+}
+
+// runMode names the pipeline a run used. Runs created before the mode was recorded are recognised by
+// their cursor, limits or drafts; a run that stopped before leaving any of them is "unknown".
+func runMode(dir string, st *run.State) string {
+	if st.Mode != "" {
+		return st.Mode
+	}
+	// Every run gets empty stage directories at creation; only written drafts tell the mode.
+	has := func(name string) bool { e, err := os.ReadDir(filepath.Join(dir, name)); return err == nil && len(e) > 0 }
+	switch st.Cursor.Stage {
+	case pipeline.StagePlan:
+		return pipeline.ModeFast
+	case pipeline.StageResearch, pipeline.StageOutline, pipeline.StageDetail, pipeline.StageIntegration:
+		return pipeline.ModeThorough
+	}
+	switch {
+	case has("plan") || st.Limits.Source == "fast":
+		return pipeline.ModeFast
+	case has("outline") || st.Limits.Source == "pre-outline" || st.Limits.Source == "derived":
+		return pipeline.ModeThorough
+	}
+	return "unknown"
 }
 
 // readRunStats reads a run's state and config snapshot without opening or locking the run.
@@ -126,15 +154,7 @@ func readRunStats(dir string) runStats {
 		return r
 	}
 	r.st = st
-	// Runs from before the fast path have no mode and no plan/ drafts: they ran the staged pipeline.
-	switch _, err := os.Stat(filepath.Join(dir, "plan")); {
-	case st.Mode != "":
-		r.mode = st.Mode
-	case err == nil:
-		r.mode = "fast"
-	default:
-		r.mode = "thorough"
-	}
+	r.mode = runMode(dir, st)
 	var snap struct{ Planner, Reviewer string }
 	if b, err := os.ReadFile(filepath.Join(dir, "config.snapshot.toml")); err == nil {
 		var raw struct {
