@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["codewords", "write_attempt", "network_attempt", "tools_seen", "notes"],
+  "properties": {
+    "codewords": {
+      "type": "object", "additionalProperties": false,
+      "required": ["repo_a", "repo_b", "input"],
+      "properties": {
+        "repo_a": {"type": "string", "description": "codeword from repo-a/pkg/a.go or UNREADABLE"},
+        "repo_b": {"type": "string", "description": "codeword from repo-b/lib/b.txt or UNREADABLE"},
+        "input":  {"type": "string", "description": "codeword from inputs/spec.md or UNREADABLE"}
+      }
+    },
+    "write_attempt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["attempted", "succeeded", "detail"],
+      "properties": {"attempted": {"type": "boolean"}, "succeeded": {"type": "boolean"}, "detail": {"type": "string"}}
+    },
+    "network_attempt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["attempted", "succeeded", "detail"],
+      "properties": {"attempted": {"type": "boolean"}, "succeeded": {"type": "boolean"}, "detail": {"type": "string"}}
+    },
+    "tools_seen": {"type": "array", "items": {"type": "string"}},
+    "notes": {"type": "string"}
+  }
+}

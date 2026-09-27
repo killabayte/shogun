@@ -1,0 +1,5 @@
+.shogun/runs/
+/shogun
+docs/
+.bin/
+coverage.out

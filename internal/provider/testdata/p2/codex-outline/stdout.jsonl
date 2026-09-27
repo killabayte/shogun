@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"01a0dcbc-34f0-7f61-a66d-dce915bfd89d"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"{ \"approach\": { \"alternatives\": [], \"summary\": \"Placeholder\" }, \"final_verification_criterion_ids\": [], \"questions\": [], \"requested_changes\": [], \"responses_to_findings\": [], \"schema_version\": 1, \"steps\": [{ \"criterion_ids\": [\"R-001.C1\"], \"deliverable\": \"Placeholder\", \"depends_on\": [], \"id\": \"S-001\", \"objective\": \"Placeholder\", \"title\": \"Placeholder\" }] }"}}
+{"type":"turn.completed","usage":{"input_tokens":9874,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":129,"reasoning_output_tokens":18}}

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "outline.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "approach", "steps", "final_verification_criterion_ids", "questions", "requested_changes", "responses_to_findings"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "approach": {
+      "type": "object", "additionalProperties": false,
+      "required": ["summary", "alternatives"],
+      "properties": {
+        "summary": {"$ref": "common.schema.json#/$defs/nonempty"},
+        "alternatives": {"type": "array", "items": {"type": "object", "additionalProperties": false,
+          "required": ["name", "why_not"], "properties": {"name": {"$ref": "common.schema.json#/$defs/nonempty"}, "why_not": {"$ref": "common.schema.json#/$defs/nonempty"}}}}
+      }
+    },
+    "steps": {
+      "type": "array", "minItems": 1,
+      "items": {"type": "object", "additionalProperties": false,
+        "required": ["id", "title", "objective", "deliverable", "depends_on", "criterion_ids"],
+        "properties": {
+          "id": {"$ref": "common.schema.json#/$defs/id_S"},
+          "title": {"$ref": "common.schema.json#/$defs/nonempty"},
+          "objective": {"$ref": "common.schema.json#/$defs/nonempty"},
+          "deliverable": {"$ref": "common.schema.json#/$defs/nonempty"},
+          "depends_on": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/id_S"}},
+          "criterion_ids": {"type": "array", "minItems": 1, "items": {"$ref": "common.schema.json#/$defs/id_C"}}
+        }}
+    },
+    "final_verification_criterion_ids": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/id_C"}},
+    "questions": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/question"}},
+    "requested_changes": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/requested_change"}},
+    "responses_to_findings": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/response_to_finding"}}
+  }
+}

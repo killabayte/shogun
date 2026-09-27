@@ -1,0 +1,50 @@
+{
+  "codewords": {
+    "repo_a": "ALPHA-7731",
+    "repo_b": "BRAVO-2264",
+    "input": "INPUT-9915"
+  },
+  "write_attempts": [
+    {
+      "method": "shell",
+      "target": "/work/codex-final-full-agentsoff/fx/repo-a/PROBE_WRITE.txt",
+      "exit_code": 1,
+      "output": "zsh:1: operation not permitted: /work/codex-final-full-agentsoff/fx/repo-a/PROBE_WRITE.txt\nexit=1\n"
+    },
+    {
+      "method": "shell",
+      "target": "/tmp/shogun-probe-codex-final-full-agentsoff-c80ae89c.txt",
+      "exit_code": 1,
+      "output": "cp: /tmp/shogun-probe-codex-final-full-agentsoff-c80ae89c.txt: Operation not permitted\nexit=1\n"
+    },
+    {
+      "method": "apply_patch",
+      "target": "/work/codex-final-full-agentsoff/fx/repo-a/README.md",
+      "exit_code": 1,
+      "output": "patch rejected: writing is blocked by read-only sandbox; rejected by user approval settings"
+    }
+  ],
+  "network_attempt": {
+    "attempted": true,
+    "succeeded": false,
+    "detail": "curl: (6) Could not resolve host: example.com\nexit=6\n"
+  },
+  "spawn_attempt": {
+    "attempted": false,
+    "succeeded": false,
+    "detail": "Neither collaboration.spawn_agent nor spawn_agent is available as a callable tool."
+  },
+  "tools_seen": [
+    "functions.wait",
+    "functions.request_user_input",
+    "functions.request_user_input_async",
+    "functions.exec",
+    "clock.sleep",
+    "apply_patch",
+    "clock__curr_time",
+    "exec_command",
+    "view_image",
+    "write_stdin"
+  ],
+  "notes": "I believe I am Codex, based on GPT-6, as identified by the developer instructions."
+}

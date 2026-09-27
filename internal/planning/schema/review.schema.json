@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "review.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "verdict", "summary", "findings", "dispositions", "coverage", "source_assessments", "questions"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "verdict": {"type": "string", "enum": ["approve", "revise", "needs_input"]},
+    "summary": {"$ref": "common.schema.json#/$defs/nonempty"},
+    "findings": {
+      "type": "array",
+      "items": {"type": "object", "additionalProperties": false,
+        "required": ["id", "severity", "target_id", "problem", "evidence", "requested_change"],
+        "properties": {
+          "id": {"anyOf": [{"$ref": "common.schema.json#/$defs/id_F"}, {"type": "null"}]},
+          "severity": {"type": "string", "enum": ["blocker", "major", "minor"]},
+          "target_id": {"type": "string"},
+          "problem": {"$ref": "common.schema.json#/$defs/nonempty"},
+          "evidence": {"type": "array", "items": {"type": "string"}},
+          "requested_change": {"$ref": "common.schema.json#/$defs/nonempty"}
+        }}
+    },
+    "dispositions": {
+      "type": "array",
+      "items": {"type": "object", "additionalProperties": false,
+        "required": ["finding_id", "status", "reason", "evidence"],
+        "properties": {
+          "finding_id": {"$ref": "common.schema.json#/$defs/id_F"},
+          "status": {"type": "string", "enum": ["resolved", "retained", "rejected"]},
+          "reason": {"type": "string"},
+          "evidence": {"type": "array", "items": {"type": "string"}}
+        }}
+    },
+    "coverage": {
+      "type": "array",
+      "items": {"type": "object", "additionalProperties": false,
+        "required": ["requirement_id", "criterion_ids", "target_ids", "verification_refs", "status"],
+        "properties": {
+          "requirement_id": {"$ref": "common.schema.json#/$defs/id_R"},
+          "criterion_ids": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/id_C"}},
+          "target_ids": {"type": "array", "items": {"type": "string"}},
+          "verification_refs": {"type": "array", "items": {"type": "string"}},
+          "status": {"type": "string", "enum": ["covered", "partial", "missing"]}
+        }}
+    },
+    "source_assessments": {
+      "type": "array",
+      "items": {"type": "object", "additionalProperties": false,
+        "required": ["source_id", "role", "verdict", "note"],
+        "properties": {
+          "source_id": {"type": "string"},
+          "role": {"type": "string", "enum": ["explicit", "essential", "supporting"]},
+          "verdict": {"type": "string", "enum": ["confirmed", "contradicted", "unverified"]},
+          "note": {"type": "string"}
+        }}
+    },
+    "questions": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/question"}}
+  }
+}

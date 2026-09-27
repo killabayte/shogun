@@ -1,0 +1,125 @@
+{
+ "argv": [
+  "/Applications/ChatGPT.app/Contents/Resources/codex",
+  "exec",
+  "--json",
+  "-m",
+  "gpt-6-astra",
+  "-c",
+  "model_reasoning_effort=high",
+  "-c",
+  "approval_policy=\"never\"",
+  "-s",
+  "read-only",
+  "--ephemeral",
+  "--skip-git-repo-check",
+  "-C",
+  "/work/codex-spawn-depth0/fx/repo-a",
+  "--ignore-user-config",
+  "--disable",
+  "apps",
+  "--disable",
+  "browser_use",
+  "--disable",
+  "browser_use_external",
+  "--disable",
+  "computer_use",
+  "--disable",
+  "image_generation",
+  "--disable",
+  "multi_agent",
+  "--disable",
+  "goals",
+  "--disable",
+  "hooks",
+  "-c",
+  "mcp_servers={}",
+  "-c",
+  "plugins={}",
+  "-c",
+  "web_search=\"disabled\"",
+  "-c",
+  "project_doc_max_bytes=0",
+  "-c",
+  "agents.max_depth=0",
+  "--output-schema",
+  "/work/p0a/spawn-schema.json",
+  "-o",
+  "/work/codex-spawn-depth0/last.spawn.json",
+  "-"
+ ],
+ "binary": "/Applications/ChatGPT.app/Contents/Resources/codex",
+ "binary_version": "codex-cli 0.155.0-alpha.16",
+ "cli": "codex",
+ "cwd": "/work/codex-spawn-depth0/fx/repo-a",
+ "duration_s": 17.1,
+ "env_extra": [
+  "RUST_LOG=codex_exec=info"
+ ],
+ "env_unset": [
+  "CLAUDECODE",
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+  "CODEX_API_KEY"
+ ],
+ "exit_code": 0,
+ "fixture_manifest_after": {
+  "digest": "5a1e88bd942600ae425a8ac6203777d81dbbf3267e67dc5250415532f0aba0ed",
+  "files": {
+   "inputs/spec.md": {
+    "mtime_ns": 1790154870789877479,
+    "sha256": "00bb2f1e4b88d3fcbb8637a4c011947ac27fb8097001d8dc8b396cde17cb0b1b",
+    "size": 39
+   },
+   "repo-a/README.md": {
+    "mtime_ns": 1790154870789572442,
+    "sha256": "e76dba8245a73f8350405add7f439864578e1a5584ee82d077991a4b8042cc6f",
+    "size": 9
+   },
+   "repo-a/pkg/a.go": {
+    "mtime_ns": 1790154870789461444,
+    "sha256": "f3e870d51f107e502a589eb170ba225e85da87bbee1d8faf2792a0140975a769",
+    "size": 49
+   },
+   "repo-b/lib/b.txt": {
+    "mtime_ns": 1790154870789754981,
+    "sha256": "c5bc1155036db690a98bd04e51b431321c78496e8be0eba71985d6d7a0bbaf6e",
+    "size": 35
+   }
+  }
+ },
+ "fixture_manifest_before": {
+  "digest": "5a1e88bd942600ae425a8ac6203777d81dbbf3267e67dc5250415532f0aba0ed",
+  "files": {
+   "inputs/spec.md": {
+    "mtime_ns": 1790154870789877479,
+    "sha256": "00bb2f1e4b88d3fcbb8637a4c011947ac27fb8097001d8dc8b396cde17cb0b1b",
+    "size": 39
+   },
+   "repo-a/README.md": {
+    "mtime_ns": 1790154870789572442,
+    "sha256": "e76dba8245a73f8350405add7f439864578e1a5584ee82d077991a4b8042cc6f",
+    "size": 9
+   },
+   "repo-a/pkg/a.go": {
+    "mtime_ns": 1790154870789461444,
+    "sha256": "f3e870d51f107e502a589eb170ba225e85da87bbee1d8faf2792a0140975a769",
+    "size": 49
+   },
+   "repo-b/lib/b.txt": {
+    "mtime_ns": 1790154870789754981,
+    "sha256": "c5bc1155036db690a98bd04e51b431321c78496e8be0eba71985d6d7a0bbaf6e",
+    "size": 35
+   }
+  }
+ },
+ "fixture_root": "/work/codex-spawn-depth0/fx",
+ "fs_changed_paths": [],
+ "fs_unchanged": true,
+ "markers": [],
+ "name": "codex-spawn-depth0",
+ "platform": "macOS-26.6.2-arm64-arm-64bit",
+ "probe_write_target_exists": false,
+ "ran_at": "2026-09-23T11:14:48+0200",
+ "timed_out": false
+}

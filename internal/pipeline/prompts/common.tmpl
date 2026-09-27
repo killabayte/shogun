@@ -1,0 +1,44 @@
+{{define "context"}}
+## Task (verbatim, {{.TaskPath}})
+
+{{.Task}}
+
+## Sources you must use
+
+Read files yourself; everything below is on disk and read-only. Do not modify anything.
+
+Repositories:
+{{range .Repos}}- {{.ID}}: {{.Root}}{{if .Head}} (HEAD {{.Head}}){{end}}
+{{end}}{{if .Inputs}}Explicit inputs (snapshots; every one is mandatory to study):
+{{range .Inputs}}- {{.ID}}: {{.Path}} (origin {{.Origin}}, sha256 {{.SHA}})
+{{end}}{{end}}{{if .Web}}Web sources archived by Shogun after research (read the archived bytes, not the live page):
+{{range .Web}}- {{.ID}}: {{.Path}} (origin {{.Origin}}, sha256 {{.SHA}})
+{{end}}{{end}}{{if .WebFailed}}Web sources Shogun could NOT archive (not evidence; assess whether any is essential):
+{{range .WebFailed}}- {{.ID}}: {{.Origin}} — {{.Path}}
+{{end}}{{end}}{{if .Decisions}}
+## Decisions
+
+Answers from the user (source user or answers-file) are binding. Entries with source assumption are provisional defaults for details the task leaves open: follow them, but they are not user requirements — they never create a requirement, a criterion or a step of their own.
+{{range .Decisions}}- {{.ID}} ({{.Source}}): {{.Question}} → {{.Answer}}
+{{end}}{{end}}{{if .OpenFindings}}
+## Open findings
+
+Every open finding stays open until the reviewer resolves or rejects it; omitting it does not close it.
+{{range .OpenFindings}}- {{.ID}} [{{.Severity}}] on {{.TargetID}} (raised in {{.OpenedIn}}): {{.Problem}} — requested: {{.RequestedChange}}
+{{end}}{{end}}{{if .GateNotes}}
+## Problems Shogun found mechanically in the previous round (must be fixed)
+
+{{range .GateNotes}}- {{.}}
+{{end}}{{end}}{{end}}
+
+{{define "minimal"}}
+## Minimal plan rule
+
+The plan contains only the work needed for the agreed result while honouring the accepted constraints. Necessary preparation, verification and rollback are in scope. No side refactors, "while we are here" improvements, generalisation for the future, extra configurability or polish that the requirements do not ask for. Ideas beyond scope do not become steps or requirements; if something outside the task seems important, ask the user a question instead. An assumption you make to fill a gap stays the smallest reasonable choice and never adds a capability, a requirement or a step (for example, choosing where a value comes from must not add a way to override it). Minimal never means dropping an agreed requirement or constraint.
+{{end}}
+
+{{define "language"}}Write all prose in {{if .Lang}}{{.Lang}}{{else}}the language of the task{{end}}. Machine ids (R-001, R-001.C1, S-001, F-001, Q-001, repo-1, in-1) are never translated.{{end}}
+
+{{define "questions"}}
+Questions: ask only about material unknowns the models must not guess (public API choices, data migration or loss, contradicting inputs, a missing mandatory spec). Each question has an id Q-NNN, why it matters, what it changes, options, and a proposed assumption. Mark it blocking only if the work cannot proceed sensibly without the answer; a non-blocking question must carry a reversible assumption you will follow meanwhile. Never ask again what the Decisions section already settles.
+{{end}}

@@ -1,0 +1,102 @@
+{
+ "argv": [
+  "/home/user/.local/bin/claude",
+  "-p",
+  "--output-format",
+  "stream-json",
+  "--verbose",
+  "--model",
+  "fable",
+  "--effort",
+  "low",
+  "--json-schema",
+  "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"fruit_instruction\",\"notes\"],\n \"properties\":{\"fruit_instruction\":{\"type\":\"string\"},\"notes\":{\"type\":\"string\"}}}\n",
+  "--tools",
+  "",
+  "--no-session-persistence"
+ ],
+ "binary": "/home/user/.local/bin/claude",
+ "binary_version": "2.1.280 (Claude Code)",
+ "cli": "claude",
+ "cwd": "/work/claude-fruit-control/fx/repo-a",
+ "duration_s": 9.4,
+ "env_extra": [],
+ "env_unset": [
+  "CLAUDECODE",
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+  "CODEX_API_KEY"
+ ],
+ "exit_code": 0,
+ "fixture_manifest_after": {
+  "digest": "25e3744f1ec93b8025a069e45d614910c8e7969db8e357a903b6b3422b1de9aa",
+  "files": {
+   "inputs/spec.md": {
+    "mtime_ns": 1790154772697495313,
+    "sha256": "00bb2f1e4b88d3fcbb8637a4c011947ac27fb8097001d8dc8b396cde17cb0b1b",
+    "size": 39
+   },
+   "repo-a/CLAUDE.md": {
+    "mtime_ns": 1790154772697589437,
+    "sha256": "badff5a42b0d92fa6b7c63aa414fbe8d81d3d87033a82c2d7083c3deb8701c7e",
+    "size": 62
+   },
+   "repo-a/README.md": {
+    "mtime_ns": 1790154772697164735,
+    "sha256": "e76dba8245a73f8350405add7f439864578e1a5584ee82d077991a4b8042cc6f",
+    "size": 9
+   },
+   "repo-a/pkg/a.go": {
+    "mtime_ns": 1790154772697038653,
+    "sha256": "f3e870d51f107e502a589eb170ba225e85da87bbee1d8faf2792a0140975a769",
+    "size": 49
+   },
+   "repo-b/lib/b.txt": {
+    "mtime_ns": 1790154772697366732,
+    "sha256": "c5bc1155036db690a98bd04e51b431321c78496e8be0eba71985d6d7a0bbaf6e",
+    "size": 35
+   }
+  }
+ },
+ "fixture_manifest_before": {
+  "digest": "25e3744f1ec93b8025a069e45d614910c8e7969db8e357a903b6b3422b1de9aa",
+  "files": {
+   "inputs/spec.md": {
+    "mtime_ns": 1790154772697495313,
+    "sha256": "00bb2f1e4b88d3fcbb8637a4c011947ac27fb8097001d8dc8b396cde17cb0b1b",
+    "size": 39
+   },
+   "repo-a/CLAUDE.md": {
+    "mtime_ns": 1790154772697589437,
+    "sha256": "badff5a42b0d92fa6b7c63aa414fbe8d81d3d87033a82c2d7083c3deb8701c7e",
+    "size": 62
+   },
+   "repo-a/README.md": {
+    "mtime_ns": 1790154772697164735,
+    "sha256": "e76dba8245a73f8350405add7f439864578e1a5584ee82d077991a4b8042cc6f",
+    "size": 9
+   },
+   "repo-a/pkg/a.go": {
+    "mtime_ns": 1790154772697038653,
+    "sha256": "f3e870d51f107e502a589eb170ba225e85da87bbee1d8faf2792a0140975a769",
+    "size": 49
+   },
+   "repo-b/lib/b.txt": {
+    "mtime_ns": 1790154772697366732,
+    "sha256": "c5bc1155036db690a98bd04e51b431321c78496e8be0eba71985d6d7a0bbaf6e",
+    "size": 35
+   }
+  }
+ },
+ "fixture_root": "/work/claude-fruit-control/fx",
+ "fs_changed_paths": [],
+ "fs_unchanged": true,
+ "markers": [
+  "repo-a/CLAUDE.md"
+ ],
+ "name": "claude-fruit-control",
+ "platform": "macOS-26.6.2-arm64-arm-64bit",
+ "probe_write_target_exists": false,
+ "ran_at": "2026-09-23T11:13:02+0200",
+ "timed_out": false
+}

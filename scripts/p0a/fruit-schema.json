@@ -1,0 +1,2 @@
+{"type":"object","additionalProperties":false,"required":["fruit_instruction","notes"],
+ "properties":{"fruit_instruction":{"type":"string"},"notes":{"type":"string"}}}

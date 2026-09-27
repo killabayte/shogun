@@ -1,0 +1,61 @@
+[
+ {
+  "run": "codex-final-full",
+  "verdict": "pass",
+  "exit_code": 0,
+  "duration_s": 73.1,
+  "fs_unchanged": true,
+  "assertions_failed": [],
+  "binary_version": "codex-cli 0.155.0-alpha.16"
+ },
+ {
+  "run": "codex-final-full-agentsoff",
+  "verdict": "pass",
+  "exit_code": 0,
+  "duration_s": 79.3,
+  "fs_unchanged": true,
+  "assertions_failed": [],
+  "binary_version": "codex-cli 0.155.0-alpha.16"
+ },
+ {
+  "run": "codex-spawn-agentsoff",
+  "verdict": "pass",
+  "exit_code": 0,
+  "duration_s": 9.5,
+  "fs_unchanged": true,
+  "assertions_failed": [],
+  "binary_version": "codex-cli 0.155.0-alpha.16"
+ },
+ {
+  "run": "codex-spawn-control-debug",
+  "verdict": "pass",
+  "exit_code": 0,
+  "duration_s": 10.3,
+  "fs_unchanged": true,
+  "assertions_failed": [],
+  "binary_version": "codex-cli 0.155.0-alpha.16"
+ },
+ {
+  "run": "codex-spawn-depth0-debug",
+  "verdict": "fail",
+  "exit_code": 0,
+  "duration_s": 19.2,
+  "fs_unchanged": true,
+  "assertions_failed": [
+   "no-collab"
+  ],
+  "binary_version": "codex-cli 0.155.0-alpha.16"
+ },
+ {
+  "run": "codex154-spawn-disable",
+  "verdict": "fail",
+  "exit_code": 0,
+  "duration_s": 15.2,
+  "fs_unchanged": true,
+  "assertions_failed": [
+   "no-collab",
+   "stderr!~=inter_agent_communication"
+  ],
+  "binary_version": "codex-cli 0.154.0-alpha.6.2"
+ }
+]

@@ -1,0 +1,159 @@
+{
+ "argv": [
+  "/home/user/.vscode/extensions/openai.chatgpt-26.908.40401-darwin-arm64/bin/macos-aarch64/codex",
+  "exec",
+  "--json",
+  "-m",
+  "gpt-6-astra",
+  "-c",
+  "model_reasoning_effort=high",
+  "-c",
+  "approval_policy=\"never\"",
+  "-s",
+  "read-only",
+  "--ephemeral",
+  "--skip-git-repo-check",
+  "-C",
+  "/work/codex154-spawn-disable/fx/repo-a",
+  "--ignore-user-config",
+  "--disable",
+  "apps",
+  "--disable",
+  "browser_use",
+  "--disable",
+  "browser_use_external",
+  "--disable",
+  "computer_use",
+  "--disable",
+  "image_generation",
+  "--disable",
+  "multi_agent",
+  "--disable",
+  "goals",
+  "--disable",
+  "hooks",
+  "-c",
+  "mcp_servers={}",
+  "-c",
+  "plugins={}",
+  "-c",
+  "web_search=\"disabled\"",
+  "-c",
+  "project_doc_max_bytes=0",
+  "--output-schema",
+  "/work/shogun/scripts/p0a/spawn-schema.json",
+  "-o",
+  "/work/codex154-spawn-disable/last.spawn.json",
+  "-"
+ ],
+ "assertions": [
+  {
+   "detail": "exit_code=0",
+   "expect": "exit=0",
+   "pass": true,
+   "resolved": "exit=0"
+  },
+  {
+   "detail": "",
+   "expect": "fs-unchanged",
+   "pass": true,
+   "resolved": "fs-unchanged"
+  },
+  {
+   "detail": "",
+   "expect": "no-collab",
+   "pass": false,
+   "resolved": "no-collab"
+  },
+  {
+   "detail": "",
+   "expect": "stderr!~=inter_agent_communication",
+   "pass": false,
+   "resolved": "stderr!~=inter_agent_communication"
+  }
+ ],
+ "binary": "/home/user/.vscode/extensions/openai.chatgpt-26.908.40401-darwin-arm64/bin/macos-aarch64/codex",
+ "binary_version": "codex-cli 0.154.0-alpha.6.2",
+ "cli": "codex",
+ "cwd": "/work/codex154-spawn-disable/fx/repo-a",
+ "duration_s": 15.2,
+ "env_policy": {
+  "denylist": [
+   "CLAUDECODE",
+   "ANTHROPIC_API_KEY",
+   "OPENAI_API_KEY",
+   "CODEX_API_KEY"
+  ],
+  "extra": [
+   "RUST_LOG=codex_exec=info,codex_core=debug"
+  ],
+  "mode": "inherit parent env minus denylist",
+  "note": "not an allowlist; the adapter must additionally strip model/effort overrides and record influencing vars in preflight"
+ },
+ "exit_code": 0,
+ "fingerprint_scope": "fixture files excluding .git/",
+ "fixture_manifest_after": {
+  "digest": "9f6f95563e700108f581154c8f8b4508a61b22c64e883ff98f61b7560589b6ad",
+  "files": {
+   "inputs/spec.md": {
+    "mtime_ns": 1790156194434475959,
+    "sha256": "00bb2f1e4b88d3fcbb8637a4c011947ac27fb8097001d8dc8b396cde17cb0b1b",
+    "size": 39
+   },
+   "repo-a/README.md": {
+    "mtime_ns": 1790156194434088637,
+    "sha256": "e76dba8245a73f8350405add7f439864578e1a5584ee82d077991a4b8042cc6f",
+    "size": 9
+   },
+   "repo-a/pkg/a.go": {
+    "mtime_ns": 1790156194433961015,
+    "sha256": "f3e870d51f107e502a589eb170ba225e85da87bbee1d8faf2792a0140975a769",
+    "size": 49
+   },
+   "repo-b/lib/b.txt": {
+    "mtime_ns": 1790156194434282548,
+    "sha256": "c5bc1155036db690a98bd04e51b431321c78496e8be0eba71985d6d7a0bbaf6e",
+    "size": 35
+   }
+  }
+ },
+ "fixture_manifest_before": {
+  "digest": "9f6f95563e700108f581154c8f8b4508a61b22c64e883ff98f61b7560589b6ad",
+  "files": {
+   "inputs/spec.md": {
+    "mtime_ns": 1790156194434475959,
+    "sha256": "00bb2f1e4b88d3fcbb8637a4c011947ac27fb8097001d8dc8b396cde17cb0b1b",
+    "size": 39
+   },
+   "repo-a/README.md": {
+    "mtime_ns": 1790156194434088637,
+    "sha256": "e76dba8245a73f8350405add7f439864578e1a5584ee82d077991a4b8042cc6f",
+    "size": 9
+   },
+   "repo-a/pkg/a.go": {
+    "mtime_ns": 1790156194433961015,
+    "sha256": "f3e870d51f107e502a589eb170ba225e85da87bbee1d8faf2792a0140975a769",
+    "size": 49
+   },
+   "repo-b/lib/b.txt": {
+    "mtime_ns": 1790156194434282548,
+    "sha256": "c5bc1155036db690a98bd04e51b431321c78496e8be0eba71985d6d7a0bbaf6e",
+    "size": 35
+   }
+  }
+ },
+ "fixture_root": "/work/codex154-spawn-disable/fx",
+ "fs_changed_paths": [],
+ "fs_unchanged": true,
+ "harness_version": 2,
+ "markers": [],
+ "name": "codex154-spawn-disable",
+ "platform": "macOS-26.6.2-arm64-arm-64bit",
+ "probe_write_target_exists": false,
+ "ran_at": "2026-09-23T11:36:49+0200",
+ "timed_out": false,
+ "tmp_probe_existed_before": false,
+ "tmp_probe_exists_after": false,
+ "tmp_probe_path": "/tmp/shogun-probe-codex154-spawn-disable-58d2cc97.txt",
+ "verdict": "fail"
+}

@@ -1,0 +1,23 @@
+[
+ "-p",
+ "--output-format",
+ "stream-json",
+ "--verbose",
+ "--model",
+ "fable",
+ "--effort",
+ "low",
+ "--json-schema",
+ "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"fruit_instruction\",\"notes\"],\n \"properties\":{\"fruit_instruction\":{\"type\":\"string\"},\"notes\":{\"type\":\"string\"}}}\n",
+ "--tools",
+ "",
+ "--permission-mode",
+ "dontAsk",
+ "--permission-prompts",
+ "none",
+ "--restricted",
+ "--safe-mode",
+ "--strict-mcp-config",
+ "--disable-slash-commands",
+ "--no-session-persistence"
+]

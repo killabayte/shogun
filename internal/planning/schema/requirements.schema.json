@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "requirements.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "requirements"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "requirements": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "statement", "source_ids", "type", "mandatory", "criteria"],
+        "properties": {
+          "id": {"$ref": "common.schema.json#/$defs/id_R"},
+          "statement": {"$ref": "common.schema.json#/$defs/nonempty"},
+          "source_ids": {"type": "array", "minItems": 1, "items": {"$ref": "common.schema.json#/$defs/nonempty"}},
+          "type": {"type": "string", "enum": ["functional", "constraint", "non_goal"]},
+          "mandatory": {"type": "boolean"},
+          "criteria": {
+            "type": "array", "minItems": 1,
+            "items": {"type": "object", "additionalProperties": false, "required": ["id", "text"],
+              "properties": {"id": {"$ref": "common.schema.json#/$defs/id_C"}, "text": {"$ref": "common.schema.json#/$defs/nonempty"}}}
+          }
+        }
+      }
+    }
+  }
+}

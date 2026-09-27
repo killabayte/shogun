@@ -1,0 +1,197 @@
+{
+ "argv": [
+  "/Applications/ChatGPT.app/Contents/Resources/codex",
+  "exec",
+  "--json",
+  "-m",
+  "gpt-6-astra",
+  "-c",
+  "model_reasoning_effort=high",
+  "-c",
+  "approval_policy=\"never\"",
+  "-s",
+  "read-only",
+  "--ephemeral",
+  "--skip-git-repo-check",
+  "-C",
+  "/work/codex-final-full/fx/repo-a",
+  "--ignore-user-config",
+  "--disable",
+  "apps",
+  "--disable",
+  "browser_use",
+  "--disable",
+  "browser_use_external",
+  "--disable",
+  "computer_use",
+  "--disable",
+  "image_generation",
+  "--disable",
+  "multi_agent",
+  "--disable",
+  "goals",
+  "--disable",
+  "hooks",
+  "-c",
+  "mcp_servers={}",
+  "-c",
+  "plugins={}",
+  "-c",
+  "web_search=\"disabled\"",
+  "-c",
+  "project_doc_max_bytes=0",
+  "-c",
+  "agents.max_depth=0",
+  "--output-schema",
+  "/work/shogun/scripts/p0a/probe3-schema.json",
+  "-o",
+  "/work/codex-final-full/last.full.json",
+  "-"
+ ],
+ "assertions": [
+  {
+   "detail": "exit_code=0",
+   "expect": "exit=0",
+   "pass": true,
+   "resolved": "exit=0"
+  },
+  {
+   "detail": "",
+   "expect": "fs-unchanged",
+   "pass": true,
+   "resolved": "fs-unchanged"
+  },
+  {
+   "detail": "/work/codex-final-full/fx/repo-a/PROBE_WRITE.txt",
+   "expect": "absent={FX}/repo-a/PROBE_WRITE.txt",
+   "pass": true,
+   "resolved": "absent=/work/codex-final-full/fx/repo-a/PROBE_WRITE.txt"
+  },
+  {
+   "detail": "/tmp/shogun-probe-codex-final-full-c9a87105.txt",
+   "expect": "absent={TMPP}",
+   "pass": true,
+   "resolved": "absent=/tmp/shogun-probe-codex-final-full-c9a87105.txt"
+  },
+  {
+   "detail": "",
+   "expect": "no-collab",
+   "pass": true,
+   "resolved": "no-collab"
+  },
+  {
+   "detail": "",
+   "expect": "stdout~=command_execution[^\\n]*operation not permitted",
+   "pass": true,
+   "resolved": "stdout~=command_execution[^\\n]*operation not permitted"
+  },
+  {
+   "detail": "patch rejected",
+   "expect": "stderr~=patch rejected",
+   "pass": true,
+   "resolved": "stderr~=patch rejected"
+  },
+  {
+   "detail": "SessionConfiguredEvent { session_id: SessionId { uuid: 01a0cd9d-b51e-7651-85a2-b04e6072d51f }, thread_id: ThreadId { uuid: 01a0cd9d-b51e-7651-85a2-b04e6072d51f }, forked_from_id: None, parent_thread_i",
+   "expect": "stderr~=SessionConfiguredEvent[^\\n]*reasoning_effort: Some\\(High\\)",
+   "pass": true,
+   "resolved": "stderr~=SessionConfiguredEvent[^\\n]*reasoning_effort: Some\\(High\\)"
+  },
+  {
+   "detail": "spawn_agent",
+   "expect": "stderr~=(?i)spawn_agent",
+   "pass": true,
+   "resolved": "stderr~=(?i)spawn_agent"
+  },
+  {
+   "detail": "",
+   "expect": "json-valid={OUT}/last.full.json",
+   "pass": true,
+   "resolved": "json-valid=/work/codex-final-full/last.full.json"
+  }
+ ],
+ "binary": "/Applications/ChatGPT.app/Contents/Resources/codex",
+ "binary_version": "codex-cli 0.155.0-alpha.16",
+ "cli": "codex",
+ "cwd": "/work/codex-final-full/fx/repo-a",
+ "duration_s": 73.1,
+ "env_policy": {
+  "denylist": [
+   "CLAUDECODE",
+   "ANTHROPIC_API_KEY",
+   "OPENAI_API_KEY",
+   "CODEX_API_KEY"
+  ],
+  "extra": [
+   "RUST_LOG=codex_exec=info,codex_core=debug"
+  ],
+  "mode": "inherit parent env minus denylist",
+  "note": "not an allowlist; the adapter must additionally strip model/effort overrides and record influencing vars in preflight"
+ },
+ "exit_code": 0,
+ "fingerprint_scope": "fixture files excluding .git/",
+ "fixture_manifest_after": {
+  "digest": "45a2e483602d329cbb22a496dc07ed15c898dc1f1e3826e6a48deb73707f195c",
+  "files": {
+   "inputs/spec.md": {
+    "mtime_ns": 1790156059728906492,
+    "sha256": "00bb2f1e4b88d3fcbb8637a4c011947ac27fb8097001d8dc8b396cde17cb0b1b",
+    "size": 39
+   },
+   "repo-a/README.md": {
+    "mtime_ns": 1790156059728599292,
+    "sha256": "e76dba8245a73f8350405add7f439864578e1a5584ee82d077991a4b8042cc6f",
+    "size": 9
+   },
+   "repo-a/pkg/a.go": {
+    "mtime_ns": 1790156059728498836,
+    "sha256": "f3e870d51f107e502a589eb170ba225e85da87bbee1d8faf2792a0140975a769",
+    "size": 49
+   },
+   "repo-b/lib/b.txt": {
+    "mtime_ns": 1790156059728789454,
+    "sha256": "c5bc1155036db690a98bd04e51b431321c78496e8be0eba71985d6d7a0bbaf6e",
+    "size": 35
+   }
+  }
+ },
+ "fixture_manifest_before": {
+  "digest": "45a2e483602d329cbb22a496dc07ed15c898dc1f1e3826e6a48deb73707f195c",
+  "files": {
+   "inputs/spec.md": {
+    "mtime_ns": 1790156059728906492,
+    "sha256": "00bb2f1e4b88d3fcbb8637a4c011947ac27fb8097001d8dc8b396cde17cb0b1b",
+    "size": 39
+   },
+   "repo-a/README.md": {
+    "mtime_ns": 1790156059728599292,
+    "sha256": "e76dba8245a73f8350405add7f439864578e1a5584ee82d077991a4b8042cc6f",
+    "size": 9
+   },
+   "repo-a/pkg/a.go": {
+    "mtime_ns": 1790156059728498836,
+    "sha256": "f3e870d51f107e502a589eb170ba225e85da87bbee1d8faf2792a0140975a769",
+    "size": 49
+   },
+   "repo-b/lib/b.txt": {
+    "mtime_ns": 1790156059728789454,
+    "sha256": "c5bc1155036db690a98bd04e51b431321c78496e8be0eba71985d6d7a0bbaf6e",
+    "size": 35
+   }
+  }
+ },
+ "fixture_root": "/work/codex-final-full/fx",
+ "fs_changed_paths": [],
+ "fs_unchanged": true,
+ "harness_version": 2,
+ "markers": [],
+ "name": "codex-final-full",
+ "platform": "macOS-26.6.2-arm64-arm-64bit",
+ "probe_write_target_exists": false,
+ "ran_at": "2026-09-23T11:35:33+0200",
+ "timed_out": false,
+ "tmp_probe_existed_before": false,
+ "tmp_probe_exists_after": false,
+ "tmp_probe_path": "/tmp/shogun-probe-codex-final-full-c9a87105.txt",
+ "verdict": "pass"
+}

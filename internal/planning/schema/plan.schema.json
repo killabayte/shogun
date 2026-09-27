@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plan.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "facts", "requirements", "source_coverage", "web_sources", "approach", "steps", "final_verification_criterion_ids", "questions", "requested_changes", "responses_to_findings"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "facts": {"$ref": "research.schema.json#/properties/facts"},
+    "requirements": {"$ref": "requirements.schema.json#/properties/requirements"},
+    "source_coverage": {"$ref": "research.schema.json#/properties/source_coverage"},
+    "web_sources": {"$ref": "research.schema.json#/properties/web_sources"},
+    "approach": {"$ref": "outline.schema.json#/properties/approach"},
+    "steps": {"$ref": "step.schema.json#/properties/steps"},
+    "final_verification_criterion_ids": {"$ref": "outline.schema.json#/properties/final_verification_criterion_ids"},
+    "questions": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/question"}},
+    "requested_changes": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/requested_change"}},
+    "responses_to_findings": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/response_to_finding"}}
+  }
+}

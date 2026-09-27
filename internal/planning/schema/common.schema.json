@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "common.schema.json",
+  "$defs": {
+    "id_R": {"type": "string", "pattern": "^R-[0-9]{3,}$"},
+    "id_C": {"type": "string", "pattern": "^R-[0-9]{3,}\\.C[0-9]+$"},
+    "id_S": {"type": "string", "pattern": "^S-[0-9]{3,}$"},
+    "id_F": {"type": "string", "pattern": "^F-[0-9]{3,}$"},
+    "id_Q": {"type": "string", "pattern": "^Q-[0-9]{3,}$"},
+    "nonempty": {"type": "string", "minLength": 1},
+    "question": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "question", "why", "impact", "options", "proposed_assumption", "blocking"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id_Q"},
+        "question": {"$ref": "#/$defs/nonempty"},
+        "why": {"$ref": "#/$defs/nonempty"},
+        "impact": {"$ref": "#/$defs/nonempty"},
+        "options": {"type": "array", "items": {"$ref": "#/$defs/nonempty"}},
+        "proposed_assumption": {"type": "string"},
+        "blocking": {"type": "boolean"}
+      }
+    },
+    "response_to_finding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["finding_id", "action", "note"],
+      "properties": {
+        "finding_id": {"$ref": "#/$defs/id_F"},
+        "action": {"type": "string", "enum": ["accepted", "disputed"]},
+        "note": {"type": "string"}
+      }
+    },
+    "requested_change": {
+      "type": "object", "additionalProperties": false,
+      "required": ["target_id", "reason"],
+      "properties": {"target_id": {"$ref": "#/$defs/nonempty"}, "reason": {"$ref": "#/$defs/nonempty"}}
+    },
+    "common_tail": {
+      "type": "object",
+      "properties": {
+        "schema_version": {"type": "integer", "const": 1},
+        "questions": {"type": "array", "items": {"$ref": "#/$defs/question"}},
+        "requested_changes": {"type": "array", "items": {"$ref": "#/$defs/requested_change"}},
+        "responses_to_findings": {"type": "array", "items": {"$ref": "#/$defs/response_to_finding"}}
+      }
+    }
+  }
+}
