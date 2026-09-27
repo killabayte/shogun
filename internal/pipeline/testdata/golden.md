@@ -12,7 +12,7 @@ repos:
 tags:
     - shogun
     - plan
-planner: claude/fable:xhigh
+planner: claude/opus:high
 reviewer: codex/gpt-6-astra:high
 ---
 
@@ -117,7 +117,7 @@ Every criterion is verified inside its step (see the traceability table).
 - outline: 1 review round(s), 0 finding(s)
 - research: 2 review round(s), 0 finding(s)
 
-Planner claude/fable:xhigh, reviewer codex/gpt-6-astra:high. The full call and review history stays in the run directory.
+Planner claude/opus:high, reviewer codex/gpt-6-astra:high. The full call and review history stays in the run directory.
 
 <!-- shogun:plan:end -->
 

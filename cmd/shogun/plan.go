@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"github.com/killabayte/shogun/internal/config"
 	"github.com/killabayte/shogun/internal/inputs"
 	"github.com/killabayte/shogun/internal/library"
+	"github.com/killabayte/shogun/internal/pipeline"
 	"github.com/killabayte/shogun/internal/run"
 )
 
@@ -28,6 +30,7 @@ func (a *app) cmdPlan(args []string) int {
 	project := fs.String("project", "", "project name for the library layout")
 	lang := fs.String("lang", "", "plan language (default: the task's language)")
 	auto := fs.Bool("auto", false, "never wait for a terminal; material unknowns produce needs_input")
+	thorough := fs.Bool("thorough", false, "staged pipeline (research → outline → one step at a time → final review) for very large plans; slower and far more expensive than the default")
 	asJSON := fs.Bool("json", false, "print the final result as JSON on stdout")
 	maxCalls := fs.Int("max-calls", 0, "cap on physical model attempts (0 = derived)")
 	maxTime := fs.Duration("max-time", 0, "cap on active time (0 = derived)")
@@ -58,8 +61,17 @@ func (a *app) cmdPlan(args []string) int {
 	}
 	defer r.Unlock()
 	st := run.NewState(id, now)
-	st.Limits = run.Limits{MaxLogicalCalls: 4 * cfg.ReviewRounds, MaxAttempts: 3 * 4 * cfg.ReviewRounds,
-		CallDeadlineSecs: cfg.CallDeadline.Seconds(), Source: "pre-outline"}
+	// Fast path (default): one planner and one reviewer attempt, at most one more pair — four physical
+	// attempts in total, retries and format corrections included — within ten minutes of active
+	// time (host work included, waiting for the user excluded) unless --max-calls/--max-time say
+	// otherwise.
+	st.Limits = run.Limits{MaxLogicalCalls: 2 * pipeline.FastRounds, MaxAttempts: 2 * pipeline.FastRounds,
+		MaxActiveSeconds: (10 * time.Minute).Seconds(), CallDeadlineSecs: cfg.CallDeadline.Seconds(), Source: "fast"}
+	if *thorough {
+		st.Mode = pipeline.ModeThorough
+		st.Limits = run.Limits{MaxLogicalCalls: 4 * cfg.ReviewRounds, MaxAttempts: 3 * 4 * cfg.ReviewRounds,
+			CallDeadlineSecs: cfg.CallDeadline.Seconds(), Source: "pre-outline"}
+	}
 	if cfg.MaxCalls > 0 {
 		st.Limits.MaxAttempts, st.Limits.Source, st.Limits.ExplicitAttempts = cfg.MaxCalls, "flag", true
 	}
@@ -89,18 +101,38 @@ func (a *app) cmdPlan(args []string) int {
 		return fail(ExitError, "write config snapshot", err)
 	}
 	fmt.Fprintf(a.stderr, "[intake] run %s\n", id)
+	// Intake runs under the run's active-time allowance: repository scans and input downloads are
+	// cancelled at the deadline instead of being counted after the fact.
+	ictx, cancel := a.ctx, func() {}
+	if st.Limits.MaxActiveSeconds > 0 {
+		ictx, cancel = context.WithDeadline(a.ctx, now.Add(time.Duration(st.Limits.MaxActiveSeconds*float64(time.Second))))
+	}
+	defer cancel()
+	overrun := func() int {
+		st.Counters.ActiveSeconds += a.now().Sub(now).Seconds()
+		st.Status, st.Reason = run.StatusPaused, fmt.Sprintf("limit: the %.0fs active-time allowance ran out during intake", st.Limits.MaxActiveSeconds)
+		_ = r.SaveState(st, a.now())
+		fmt.Fprintf(a.stderr, "run %s → paused: %s (%s)\n", id, st.Reason, r.Dir)
+		return ExitLimit
+	}
 	st.Publish.Path = outputPath(*out, cfg, a.cwd, id)
 	man := &inputs.Manifest{Version: inputs.ManifestVersion, CreatedAt: now.UTC().Format(time.RFC3339), Workspace: a.cwd,
 		Exclude: []string{st.Publish.Path, library.ReceiptPath(st.Publish.Path)}}
 	for i, root := range repos {
-		rp, err := inputs.RepoManifest(a.ctx, fmt.Sprintf("repo-%d", i+1), root, man.Exclude...)
+		rp, err := inputs.RepoManifest(ictx, fmt.Sprintf("repo-%d", i+1), root, man.Exclude...)
+		if ictx.Err() != nil {
+			return overrun()
+		}
 		if err != nil {
 			return fail(ExitError, "repository "+root, err)
 		}
 		man.Repos = append(man.Repos, rp)
 		fmt.Fprintf(a.stderr, "[intake] %s %s git=%v head=%.12s\n", rp.ID, rp.Root, rp.IsGit, rp.Head)
 	}
-	srcs, inErr := inputs.NewMaterializer().Materialize(a.ctx, r.Dir, a.cwd, ins)
+	srcs, inErr := inputs.NewMaterializer().Materialize(ictx, r.Dir, a.cwd, ins)
+	if ictx.Err() != nil {
+		return overrun()
+	}
 	man.Inputs = srcs
 	for _, s := range srcs {
 		if s.Status == "ok" {
@@ -120,11 +152,15 @@ func (a *app) cmdPlan(args []string) int {
 		}
 		return fail(ExitError, "inputs", inErr)
 	}
-	st.Cursor = run.Cursor{Stage: "research"}
+	st.Cursor = run.Cursor{Stage: pipeline.StagePlan}
+	if st.Mode == pipeline.ModeThorough {
+		st.Cursor = run.Cursor{Stage: pipeline.StageResearch}
+	}
 	st.Status = run.StatusRunning
 	if err := r.SaveState(st, a.now()); err != nil {
 		return a.errorf("%v", err)
 	}
+	st.Counters.ActiveSeconds += a.now().Sub(now).Seconds() // intake is part of the run's active time
 	fmt.Fprintf(a.stderr, "[intake] complete: %s\n", r.Dir)
 	return a.runPipeline(r, st, cfg, *auto || !a.interactive, *asJSON)
 }

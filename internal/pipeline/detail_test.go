@@ -344,4 +344,9 @@ func TestDetailReviewReturnsToOutline(t *testing.T) {
 	if l := f.e.State.Limits.MaxLogicalCalls; l != 2*6*(2+3) {
 		t.Fatalf("budget %d was re-derived by the second outline", l)
 	}
+	// Found live (PORTALS-3426): rounds of a step spent under an earlier skeleton must not count
+	// against the same step of the new one.
+	if r := p.Rounds["detail:S-001"]; r != 1 {
+		t.Fatalf("detail:S-001 rounds after the new outline = %d, want 1", r)
+	}
 }

@@ -191,3 +191,14 @@ func TestCodexPolicyAndProfileMismatch(t *testing.T) {
 		}
 	}
 }
+
+// Recorded live 2026-09-26: when the subscription's session limit is reached, the CLI answers with a
+// "<synthetic>" assistant message and a 429 result. That is a rate limit (pause, resumable), not a
+// model substitution.
+func TestRecordedClaudeSessionLimitIsRateLimit(t *testing.T) {
+	d := "testdata/p6/claude-session-limit/"
+	_, err := parseClaude(d+"stdout.jsonl", d+"stderr.log", procResult{exit: 1}, Request{Model: "fable", Effort: "xhigh", Schema: []byte(`{}`)})
+	if err == nil || err.Class != ClassRateLimit || !strings.Contains(err.Msg, "session limit") {
+		t.Fatalf("got %v, want rate_limit", err)
+	}
+}

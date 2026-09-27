@@ -157,6 +157,12 @@ func parseCodex(stdoutPath, stderrPath, lastPath string, start time.Time, pr pro
 			res.Degraded = append(res.Degraded, "unknown event "+ev.Type)
 		}
 	}
+	// Failures after the turn completed still carry the usage it reported.
+	fail := func(c Class, format string, a ...any) *Error {
+		e := fail(c, format, a...)
+		e.Usage = res.Usage
+		return e
+	}
 	if failure != "" {
 		return nil, fail(classifyCodexFailure(failure), "%s", failure)
 	}

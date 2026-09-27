@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/killabayte/shogun/internal/config"
 	"github.com/killabayte/shogun/internal/inputs"
@@ -66,14 +68,42 @@ func (a *app) cmdResume(args []string) int {
 	if err != nil {
 		return a.errorf("%v", err)
 	}
+	// Raising a limit is an explicit, recorded decision; it never lowers spend counters. It applies
+	// before anything else, so the preparation below already runs under the raised allowance.
+	if *maxCalls > 0 {
+		st.Limits.MaxAttempts, st.Limits.ExplicitAttempts = *maxCalls, true // the reserve's provenance is unchanged
+	}
+	if *maxTime > 0 {
+		st.Limits.MaxActiveSeconds = maxTime.Seconds()
+	}
+	limitStop := func() int {
+		st.Status, st.Reason = run.StatusPaused, "limit: the active-time allowance ran out while preparing the resume; raise it with --max-time"
+		_ = r.SaveState(st, a.now())
+		fmt.Fprintf(a.stderr, "run %s → paused: %s\n", st.RunID, st.Reason)
+		return ExitLimit
+	}
+	if l := st.Limits.MaxActiveSeconds; l > 0 && st.Counters.ActiveSeconds >= l {
+		return limitStop()
+	}
+	// Resume preparation (re-snapshotting, the drift check) runs under the remaining allowance too.
+	prepStart := a.now()
+	pctx, cancel := a.ctx, func() {}
+	if l := st.Limits.MaxActiveSeconds; l > 0 {
+		pctx, cancel = context.WithTimeout(a.ctx, time.Duration((l-st.Counters.ActiveSeconds)*float64(time.Second)))
+	}
+	defer cancel()
 	if *refresh {
-		if err := pipeline.Refresh(a.ctx, r, st, *cfg); err != nil {
+		if err := pipeline.Refresh(pctx, r, st, *cfg); err != nil {
+			if pctx.Err() != nil {
+				st.Counters.ActiveSeconds += a.now().Sub(prepStart).Seconds()
+				return limitStop()
+			}
 			return a.errorf("refresh: %v", err)
 		}
-		fmt.Fprintf(a.stderr, "[resume] new generation %d: repositories re-snapshotted, research starts again; spend so far is kept\n", st.Generation)
+		fmt.Fprintf(a.stderr, "[resume] new generation %d: repositories re-snapshotted, planning starts again at %s; spend so far is kept\n", st.Generation, st.Cursor.Stage)
 	} else if man, err := inputs.Load(filepath.Join(dir, "manifest.json")); err == nil {
 		// §9: changed repositories need an explicit new generation; approvals are never inherited.
-		if drift, err := inputs.CheckDrift(a.ctx, man); errors.Is(err, inputs.ErrDrift) {
+		if drift, err := inputs.CheckDrift(pctx, man); errors.Is(err, inputs.ErrDrift) {
 			return a.errorf("inputs changed since the snapshot (%s): run `shogun resume %s --refresh` for a new generation", strings.Join(drift, ", "), st.RunID)
 		}
 	}
@@ -88,12 +118,9 @@ func (a *app) cmdResume(args []string) int {
 	} else if st.Status == run.StatusNeedsInput && len(st.Progress.Pending) > 0 && !a.interactive {
 		return a.errorf("run %s needs answers: shogun resume %s --answers answers.json (questions in %s)", st.RunID, st.RunID, filepath.Join(dir, "questions.json"))
 	}
-	// Raising a limit is an explicit, recorded decision; it never lowers spend counters.
-	if *maxCalls > 0 {
-		st.Limits.MaxAttempts, st.Limits.ExplicitAttempts = *maxCalls, true // the reserve's provenance is unchanged
-	}
-	if *maxTime > 0 {
-		st.Limits.MaxActiveSeconds = maxTime.Seconds()
+	st.Counters.ActiveSeconds += a.now().Sub(prepStart).Seconds()
+	if pctx.Err() != nil {
+		return limitStop()
 	}
 	if err := r.SaveState(st, a.now()); err != nil {
 		return a.errorf("%v", err)
@@ -133,9 +160,10 @@ func (a *app) cmdStatus(args []string) int {
 	if st.Cursor.Step != "" {
 		fmt.Fprintf(a.stdout, " / %s", st.Cursor.Step)
 	}
-	fmt.Fprintf(a.stdout, " (round %d)\ngeneration: %d\ncalls:      %d logical, %d attempts, %.0fs active\nlimits:     %d logical, %d attempts (%s)\nupdated:    %s\n",
+	fmt.Fprintf(a.stdout, " (round %d)\ngeneration: %d\ncalls:      %d logical, %d attempts, %.0fs active\ntokens:     %d input, %d output (Claude list-price equivalent $%.2f)\nlimits:     %d logical, %d attempts, %.0fs active (%s)\nupdated:    %s\n",
 		st.Cursor.Round, st.Generation, st.Counters.LogicalCalls, st.Counters.Attempts, st.Counters.ActiveSeconds,
-		st.Limits.MaxLogicalCalls, st.Limits.MaxAttempts, st.Limits.Source, st.UpdatedAt)
+		st.Counters.InputTokens, st.Counters.OutputTokens, st.Counters.CostUSD,
+		st.Limits.MaxLogicalCalls, st.Limits.MaxAttempts, st.Limits.MaxActiveSeconds, st.Limits.Source, st.UpdatedAt)
 	if st.Reason != "" {
 		fmt.Fprintf(a.stdout, "reason:     %s\n", st.Reason)
 	}

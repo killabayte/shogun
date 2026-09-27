@@ -12,6 +12,7 @@ import (
 
 	"github.com/killabayte/shogun/internal/library"
 	"github.com/killabayte/shogun/internal/planning/schema"
+	"github.com/killabayte/shogun/internal/run"
 )
 
 // frontmatter is rendered in this field order (§11). status, tags and updated are the mutable
@@ -246,6 +247,13 @@ func (e *Engine) body(d *planData) string {
 		}
 	}
 
+	if minors := openMinors(&e.State.Progress); len(minors) > 0 {
+		w("\n## Review notes\n\nMinor findings left open by the review; they do not block the plan.\n\n")
+		for _, f := range minors {
+			w("- %s on %s: %s\n", f.ID, f.TargetID, clean(f.Problem))
+		}
+	}
+
 	w("\n## Review history\n\n")
 	p := &e.State.Progress
 	var keys []string
@@ -280,6 +288,16 @@ func executionLog(d *planData) string {
 		fmt.Fprintf(&b, "| %s | todo | — | — |\n", s.ID)
 	}
 	return b.String()
+}
+
+func openMinors(p *run.Progress) []run.Finding {
+	var out []run.Finding
+	for _, f := range openFindings(p) {
+		if f.Severity == "minor" {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 func schemaStep(b []byte) (*schema.Step, error) {

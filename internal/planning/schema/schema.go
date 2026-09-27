@@ -29,6 +29,7 @@ const (
 	KindStep         Kind = "step"
 	KindReview       Kind = "review"
 	KindAnswers      Kind = "answers"
+	KindPlan         Kind = "plan" // the whole plan in one document (fast path)
 )
 
 // Version is the schema_version every document must carry.
@@ -64,7 +65,7 @@ func compile() {
 		}
 	}
 	compiled = map[Kind]*jsonschema.Schema{}
-	for _, k := range []Kind{KindRequirements, KindResearch, KindOutline, KindStep, KindReview, KindAnswers} {
+	for _, k := range []Kind{KindRequirements, KindResearch, KindOutline, KindStep, KindReview, KindAnswers, KindPlan} {
 		s, err := c.Compile(string(k) + ".schema.json")
 		if err != nil {
 			compileErr = fmt.Errorf("compile %s: %w", k, err)
@@ -277,6 +278,27 @@ type Review struct {
 	Coverage          []Coverage         `json:"coverage"`
 	SourceAssessments []SourceAssessment `json:"source_assessments"`
 	Questions         []Question         `json:"questions"`
+}
+
+// Plan is the fast path's single planner document: research, skeleton and detailed steps at once.
+type Plan struct {
+	SchemaVersion  int              `json:"schema_version"`
+	Facts          []Fact           `json:"facts"`
+	Requirements   []Requirement    `json:"requirements"`
+	SourceCoverage []SourceCoverage `json:"source_coverage"`
+	WebSources     []WebSource      `json:"web_sources"`
+	Approach       struct {
+		Summary      string `json:"summary"`
+		Alternatives []struct {
+			Name   string `json:"name"`
+			WhyNot string `json:"why_not"`
+		} `json:"alternatives"`
+	} `json:"approach"`
+	Steps                         []Step              `json:"steps"`
+	FinalVerificationCriterionIDs []string            `json:"final_verification_criterion_ids"`
+	Questions                     []Question          `json:"questions"`
+	RequestedChanges              []RequestedChange   `json:"requested_changes"`
+	ResponsesToFindings           []ResponseToFinding `json:"responses_to_findings"`
 }
 
 type Answer struct {

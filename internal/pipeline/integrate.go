@@ -71,18 +71,18 @@ func (e *Engine) integrate(ctx context.Context) *Outcome {
 			return e.fail("write review", err)
 		}
 		// Ledger reconciliation: the final review sees and must settle every open finding.
-		notes := applyReview(p, key, fmt.Sprintf("%s r%d", key, rev), review, relevant(p, key))
+		notes := applyReview(p, key, fmt.Sprintf("%s r%d", key, rev), review, blocking(relevant(p, key)))
 		p.Rounds[key]++
 		e.State.Counters.ReviewRounds++
 		settled, _ := loadDecisions(e.Run.Dir)
 		addQuestions(p, key, "reviewer", review.Questions, settled)
 		notes = append(notes, e.integrationGate(d, review)...)
 		notes = append(notes, e.sourceGate(key, review)...)
-		e.logf("[%s] r%d: reviewer %s, %d open finding(s), %d gate note(s)", key, rev, review.Verdict, len(relevant(p, key)), len(notes))
+		e.logf("[%s] r%d: reviewer %s, %d blocking finding(s), %d gate note(s)", key, rev, review.Verdict, len(blocking(relevant(p, key))), len(notes))
 		if target := e.backTarget(key); target != "" {
 			return e.backTo(target, notes)
 		}
-		if review.Verdict == "approve" && len(notes) == 0 && len(relevant(p, key)) == 0 && len(p.Pending) == 0 {
+		if review.Verdict == "approve" && len(notes) == 0 && len(blocking(relevant(p, key))) == 0 && len(p.Pending) == 0 {
 			p.GateNotes = nil
 			if err := e.recordApproval(candidate, reviewRel); err != nil {
 				return e.fail("approval", err)
@@ -220,10 +220,19 @@ func (e *Engine) recordApproval(candidate []byte, reviewRel string) error {
 // and never over a different file; the run is approved only after both verify. It is idempotent: a
 // crash between the two files is repaired by running it again, without model calls.
 func (e *Engine) publish(ctx context.Context) *Outcome {
+	if o := e.timeUp("publication"); o != nil {
+		return o
+	}
 	if err := e.checkSnapshots(); err != nil {
 		return e.fail("publish", err)
 	}
-	if drift, err := inputs.CheckDrift(ctx, e.Manifest); err != nil {
+	octx, cancel := e.opCtx(ctx)
+	drift, err := inputs.CheckDrift(octx, e.Manifest)
+	cancel()
+	if o := e.timeUp("the drift check finished"); o != nil {
+		return o
+	}
+	if err != nil {
 		if errors.Is(err, inputs.ErrDrift) {
 			return e.stop(run.StatusPaused, "drift: "+strings.Join(drift, ", ")+" changed since the snapshot; run `shogun resume --refresh`")
 		}

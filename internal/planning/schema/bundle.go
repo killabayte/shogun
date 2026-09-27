@@ -7,7 +7,7 @@ import (
 )
 
 // ModelKinds are the documents a model produces (and therefore must be strict for Codex).
-var ModelKinds = []Kind{KindResearch, KindOutline, KindStep, KindReview}
+var ModelKinds = []Kind{KindResearch, KindOutline, KindStep, KindReview, KindPlan}
 
 // Bundle returns a self-contained schema for kind: every cross-file $ref is inlined into a local
 // "#/$defs/…" so the document can be passed to a CLI (--json-schema / --output-schema) that cannot

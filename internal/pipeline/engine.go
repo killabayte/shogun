@@ -49,8 +49,10 @@ type Engine struct {
 	// Project names the plan's library folder and frontmatter; CLIVersions go into the receipt.
 	Project     string
 	CLIVersions map[string]string
-	Log         io.Writer
-	Now         func() time.Time
+
+	segStart time.Time // start of the current active segment (engine work, not user waits)
+	Log      io.Writer
+	Now      func() time.Time
 }
 
 // Outcome is where the run stopped.
@@ -71,7 +73,10 @@ func (e *Engine) Execute(ctx context.Context) Outcome {
 		p.Stalemate = map[string]string{}
 	}
 	if e.State.Cursor.Stage == "" || e.State.Cursor.Stage == "intake" {
-		e.State.Cursor = run.Cursor{Stage: StageResearch}
+		e.State.Cursor = run.Cursor{Stage: StagePlan}
+		if e.State.Mode == ModeThorough {
+			e.State.Cursor = run.Cursor{Stage: StageResearch}
+		}
 	}
 	if e.State.Status == run.StatusApproved && e.State.Publish.Done {
 		return Outcome{Status: run.StatusApproved, Reason: "published " + e.State.Publish.Path}
@@ -83,9 +88,12 @@ func (e *Engine) Execute(ctx context.Context) Outcome {
 		return *e.stop(run.StatusFailed, err.Error())
 	}
 	e.State.Status, e.State.Reason = run.StatusRunning, ""
+	e.segStart = time.Now()
 	for {
 		var o *Outcome
 		switch e.State.Cursor.Stage {
+		case StagePlan:
+			o = e.fast(ctx)
 		case StageIntegration:
 			o = e.integrate(ctx)
 		case StagePublish:
@@ -192,18 +200,18 @@ func (e *Engine) unit(ctx context.Context) *Outcome {
 		if err := e.Run.WriteArtifact(fmt.Sprintf("reviews/%s-%d.json", e.unitLabel(), rev), rres.Payload); err != nil {
 			return e.fail("write review", err)
 		}
-		notes := applyReview(p, key, where, review, relevant(p, key))
+		notes := applyReview(p, key, where, review, blocking(relevant(p, key)))
 		p.Rounds[key]++
 		e.State.Counters.ReviewRounds++
 		addQuestions(p, key, "reviewer", review.Questions, settled)
 		notes = append(notes, e.gate(stage, doc, review)...)
 		notes = append(notes, e.sourceGate(key, review)...)
-		e.logf("[%s] r%d: reviewer %s, %d open finding(s), %d gate note(s)", key, rev, review.Verdict, len(relevant(p, key)), len(notes))
+		e.logf("[%s] r%d: reviewer %s, %d blocking finding(s), %d gate note(s)", key, rev, review.Verdict, len(blocking(relevant(p, key))), len(notes))
 
 		if target := e.backTarget(key); target != "" {
 			return e.backTo(target, notes)
 		}
-		if review.Verdict == "approve" && len(notes) == 0 && len(relevant(p, key)) == 0 && len(p.Pending) == 0 {
+		if review.Verdict == "approve" && len(notes) == 0 && len(blocking(relevant(p, key))) == 0 && len(p.Pending) == 0 {
 			p.GateNotes = nil
 			e.logf("[%s] approved at r%d", key, rev)
 			return e.approve(stage, rev, doc, res.Payload)
@@ -225,11 +233,13 @@ func (e *Engine) approve(stage string, rev int, doc *stageDoc, payload []byte) *
 	switch stage {
 	case StageResearch:
 		p.Approved[StageResearch] = rev
+		freshUnits(p, func(k string) bool { return k == StageOutline || strings.HasPrefix(k, StageDetail+":") })
 		e.State.Cursor = run.Cursor{Stage: StageOutline}
 		e.State.Hashes["requirements"] = digest(payload)
 	case StageOutline:
 		p.Approved[StageOutline] = rev
 		p.Accepted = map[string]int{} // a new skeleton resets every detail approval
+		freshUnits(p, func(k string) bool { return strings.HasPrefix(k, StageDetail+":") })
 		e.State.Cursor = run.Cursor{Stage: StageDetail}
 		e.deriveBudget(len(doc.outline.Steps))
 	case StageDetail:
@@ -244,6 +254,18 @@ func (e *Engine) approve(stage string, rev int, doc *stageDoc, payload []byte) *
 		e.State.Cursor = run.Cursor{Stage: StageDetail}
 	}
 	return e.checkpoint()
+}
+
+// freshUnits gives the units rebuilt on a new approval their own review rounds (§7: R rounds per
+// unit). A step of a new skeleton is a new unit; the run's call ceiling C still bounds the total,
+// and nothing is closed or forgotten in the ledger.
+func freshUnits(p *run.Progress, rebuilt func(key string) bool) {
+	for k := range p.Rounds {
+		if rebuilt(k) {
+			delete(p.Rounds, k)
+			delete(p.Stalemate, k)
+		}
+	}
 }
 
 // stageDoc is the parsed planner document of either stage.
@@ -290,6 +312,27 @@ func (e *Engine) check(stage string, payload []byte) (*stageDoc, []string, error
 }
 
 func (e *Engine) checkResearch(r *schema.Research) []string {
+	p := e.checkResearchSources(r)
+	// A requirement accepted before (the work came back from outline) cannot silently disappear or
+	// become optional: that is the user's decision, not the model's.
+	if prev, err := e.approvedResearch(); err == nil && prev != nil {
+		now := map[string]schema.Requirement{}
+		for _, q := range r.Requirements {
+			now[q.ID] = q
+		}
+		for _, q := range prev.Requirements {
+			if n, ok := now[q.ID]; !ok {
+				p = append(p, fmt.Sprintf("previously accepted requirement %s was removed", q.ID))
+			} else if q.Mandatory && !n.Mandatory {
+				p = append(p, fmt.Sprintf("previously mandatory requirement %s became optional", q.ID))
+			}
+		}
+	}
+	return p
+}
+
+// checkResearchSources: the registry is well formed and every source is covered and cited correctly.
+func (e *Engine) checkResearchSources(r *schema.Research) []string {
 	p := schema.CheckRequirements(r.Requirements)
 	if len(r.Requirements) == 0 {
 		p = append(p, "the requirements registry is empty")
@@ -334,21 +377,6 @@ func (e *Engine) checkResearch(r *schema.Research) []string {
 				p = append(p, fmt.Sprintf("%s cites unknown source %s", req.ID, s))
 			case assumed[s]:
 				p = append(p, fmt.Sprintf("%s cites %s, an assumption: an assumption is not a user requirement (§7)", req.ID, s))
-			}
-		}
-	}
-	// A requirement accepted before (the work came back from outline) cannot silently disappear or
-	// become optional: that is the user's decision, not the model's.
-	if prev, err := e.approvedResearch(); err == nil && prev != nil {
-		now := map[string]schema.Requirement{}
-		for _, q := range r.Requirements {
-			now[q.ID] = q
-		}
-		for _, q := range prev.Requirements {
-			if n, ok := now[q.ID]; !ok {
-				p = append(p, fmt.Sprintf("previously accepted requirement %s was removed", q.ID))
-			} else if q.Mandatory && !n.Mandatory {
-				p = append(p, fmt.Sprintf("previously mandatory requirement %s became optional", q.ID))
 			}
 		}
 	}
@@ -399,7 +427,7 @@ func (e *Engine) gate(stage string, d *stageDoc, rev *schema.Review) []string {
 // re-cutting a batch never leaves its unresolved findings behind. A finding aimed at one specific
 // step of that earlier batch gates only that step.
 func relevant(p *run.Progress, key string) []run.Finding {
-	if key == StageIntegration { // the final gate reconciles the whole ledger
+	if key == StageIntegration || key == StagePlan { // a whole-plan review reconciles the whole ledger
 		return openFindings(p)
 	}
 	targets := map[string]bool{key: true}
@@ -540,7 +568,15 @@ func (e *Engine) call(ctx context.Context, role, stage, prompt string, kind sche
 	}
 	deadline, budgetBound := e.Now().Add(e.Cfg.CallDeadline), false
 	if l.MaxActiveSeconds > 0 {
-		if left := time.Duration((l.MaxActiveSeconds - st.Counters.ActiveSeconds) * float64(time.Second)); e.Now().Add(left).Before(deadline) {
+		leftSec := l.MaxActiveSeconds - e.active()
+		// Fast path: a planner call leaves a third of the run's time for the independent review.
+		if stage == StagePlan && role == "planner" {
+			leftSec -= l.MaxActiveSeconds / 3
+			if leftSec < 60 {
+				return nil, e.stop(run.StatusPaused, fmt.Sprintf("limit: %.0fs of active time left is not enough for another planner call and its review", l.MaxActiveSeconds-e.active())+e.draftNote())
+			}
+		}
+		if left := time.Duration(leftSec * float64(time.Second)); e.Now().Add(left).Before(deadline) {
 			deadline, budgetBound = e.Now().Add(left), true
 		}
 	}
@@ -556,7 +592,8 @@ func (e *Engine) call(ctx context.Context, role, stage, prompt string, kind sche
 		if res, ok := reuseResult(filepath.Join(e.Run.Dir, "calls", id), reqDigest); ok {
 			st.Counters.LogicalCalls++
 			st.Counters.Attempts += res.Attempts
-			st.Counters.ActiveSeconds += res.ActiveSeconds
+			st.Counters.ActiveSeconds += res.ActiveSeconds // spent by the process that crashed
+			addUsages(&st.Counters, res.Usages)
 			e.logf("[%s] %s call %s: finished result recovered after a crash, not called again", e.unitKey(), role, id)
 			e.noteReported(role, res)
 			return res, nil
@@ -577,8 +614,8 @@ func (e *Engine) call(ctx context.Context, role, stage, prompt string, kind sche
 	start := time.Now()
 	res, err := runner.Run(ctx, req)
 	spent := time.Since(start).Seconds()
+	e.flushActive()
 	st.Counters.LogicalCalls++
-	st.Counters.ActiveSeconds += spent
 	var perr *provider.Error
 	if err != nil && !errors.As(err, &perr) {
 		perr = &provider.Error{Class: provider.ClassConfig, Msg: err.Error()}
@@ -586,18 +623,22 @@ func (e *Engine) call(ctx context.Context, role, stage, prompt string, kind sche
 	if res != nil {
 		st.Counters.Attempts += res.Attempts
 		res.ActiveSeconds = spent // durable, so a recovered result restores the measured spend
+		addUsages(&st.Counters, res.Usages)
 		_ = writeJSON(filepath.Join(dir, "result.json"), res)
 		e.noteReported(role, res)
+		e.logSpend()
 		return res, nil
 	}
 	st.Counters.Attempts += perr.Attempts
+	addUsages(&st.Counters, perr.Usages)
+	e.logSpend()
 	_ = writeJSON(filepath.Join(dir, "result.json"), map[string]any{"error": perr.Class, "message": perr.Msg, "attempts": perr.Attempts})
 	reason := fmt.Sprintf("%s %s call failed: %s", stage, role, perr)
 	switch {
 	case perr.Class == provider.ClassTimeout && budgetBound:
-		return nil, e.stop(run.StatusPaused, fmt.Sprintf("limit: active time budget ran out during the %s %s call", stage, role))
+		return nil, e.stop(run.StatusPaused, fmt.Sprintf("limit: active time budget ran out during the %s %s call", stage, role)+e.draftNote())
 	case perr.BudgetStopped:
-		return nil, e.stop(run.StatusPaused, fmt.Sprintf("limit: attempt budget ran out during the %s %s call (%s)", stage, role, perr))
+		return nil, e.stop(run.StatusPaused, fmt.Sprintf("limit: attempt budget ran out during the %s %s call (%s)", stage, role, perr)+e.draftNote())
 	}
 	switch perr.Class {
 	case provider.ClassRateLimit, provider.ClassTimeout:
@@ -623,6 +664,58 @@ func reuseResult(dir, reqDigest string) (*provider.Result, bool) {
 	return &res, true
 }
 
+// AddUsages books reported usages into counters (used by doctor for the preflight's spend).
+func AddUsages(c *run.Counters, usages []json.RawMessage) { addUsages(c, usages) }
+
+// addUsages books every attempt's reported usage once. An attempt without usage marks the totals
+// incomplete instead of counting as zero.
+func addUsages(c *run.Counters, usages []json.RawMessage) {
+	if len(usages) == 0 {
+		c.UsageIncomplete = true
+	}
+	for _, u := range usages {
+		if !addUsage(c, u) {
+			c.UsageIncomplete = true
+		}
+	}
+}
+
+// addUsage adds one attempt's usage: Claude's modelUsage (per model: uncached input, cache read,
+// cache creation, output, reported cost) or Codex's turn usage (input includes cached input, which
+// is split out; reasoning is kept separate). It reports whether any usage was found.
+func addUsage(c *run.Counters, raw json.RawMessage) bool {
+	var codex struct {
+		InputTokens      *int64 `json:"input_tokens"`
+		CachedInput      int64  `json:"cached_input_tokens"`
+		CacheWriteTokens int64  `json:"cache_write_input_tokens"`
+		OutputTokens     int64  `json:"output_tokens"`
+		ReasoningTokens  int64  `json:"reasoning_output_tokens"`
+	}
+	if json.Unmarshal(raw, &codex) == nil && codex.InputTokens != nil {
+		c.InputTokens += *codex.InputTokens - codex.CachedInput
+		c.CacheReadTokens += codex.CachedInput
+		c.CacheWriteTokens += codex.CacheWriteTokens
+		c.OutputTokens += codex.OutputTokens
+		c.ReasoningTokens += codex.ReasoningTokens
+		return true
+	}
+	var claude map[string]struct {
+		InputTokens, OutputTokens, CacheReadInputTokens, CacheCreationInputTokens int64
+		CostUSD                                                                   float64
+	}
+	if json.Unmarshal(raw, &claude) != nil || len(claude) == 0 {
+		return false
+	}
+	for _, m := range claude {
+		c.InputTokens += m.InputTokens
+		c.CacheReadTokens += m.CacheReadInputTokens
+		c.CacheWriteTokens += m.CacheCreationInputTokens
+		c.OutputTokens += m.OutputTokens
+		c.CostUSD += m.CostUSD
+	}
+	return true
+}
+
 func (e *Engine) noteReported(role string, res *provider.Result) {
 	if e.State.Progress.Reported == nil {
 		e.State.Progress.Reported = map[string]string{}
@@ -637,13 +730,86 @@ func (e *Engine) budget() *Outcome {
 	c, l := e.State.Counters, e.State.Limits
 	switch {
 	case l.MaxLogicalCalls > 0 && c.LogicalCalls >= l.MaxLogicalCalls:
-		return e.stop(run.StatusPaused, fmt.Sprintf("limit: %d logical calls used (%s)", c.LogicalCalls, l.Source))
+		return e.stop(run.StatusPaused, fmt.Sprintf("limit: %d logical calls used (%s)", c.LogicalCalls, l.Source)+e.draftNote())
 	case l.MaxAttempts > 0 && c.Attempts >= l.MaxAttempts:
-		return e.stop(run.StatusPaused, fmt.Sprintf("limit: %d attempts used", c.Attempts))
-	case l.MaxActiveSeconds > 0 && c.ActiveSeconds >= l.MaxActiveSeconds:
-		return e.stop(run.StatusPaused, fmt.Sprintf("limit: %.0fs active time used", c.ActiveSeconds))
+		return e.stop(run.StatusPaused, fmt.Sprintf("limit: %d physical attempts used", c.Attempts)+e.draftNote())
+	case l.MaxActiveSeconds > 0 && e.active() >= l.MaxActiveSeconds:
+		return e.stop(run.StatusPaused, fmt.Sprintf("limit: %.0fs of active time used", e.active())+e.draftNote())
 	}
 	return nil
+}
+
+// opCtx bounds a host operation (downloads, repository scans) by the run's remaining active time.
+func (e *Engine) opCtx(parent context.Context) (context.Context, context.CancelFunc) {
+	if l := e.State.Limits.MaxActiveSeconds; l > 0 {
+		return context.WithTimeout(parent, time.Duration((l-e.active())*float64(time.Second)))
+	}
+	return parent, func() {}
+}
+
+// timeUp stops the run when the active-time allowance is gone (before a phase starts, or when a
+// host operation was cancelled by it).
+func (e *Engine) timeUp(what string) *Outcome {
+	if l := e.State.Limits.MaxActiveSeconds; l > 0 && e.active() >= l {
+		return e.stop(run.StatusPaused, fmt.Sprintf("limit: the %.0fs active-time allowance ran out before %s; raise it with `resume --max-time`", l, what)+e.draftNote())
+	}
+	return nil
+}
+
+// active is the run's active time so far: engine work across all processes, user waits excluded.
+func (e *Engine) active() float64 {
+	if e.segStart.IsZero() {
+		return e.State.Counters.ActiveSeconds
+	}
+	return e.State.Counters.ActiveSeconds + time.Since(e.segStart).Seconds()
+}
+
+// flushActive books the current active segment into the counters.
+func (e *Engine) flushActive() {
+	now := time.Now()
+	if !e.segStart.IsZero() {
+		e.State.Counters.ActiveSeconds += now.Sub(e.segStart).Seconds()
+	}
+	e.segStart = now
+}
+
+// draftNote points at the unapproved draft a limit leaves behind.
+func (e *Engine) draftNote() string {
+	if e.State.Cursor.Stage == StagePlan && exists(filepath.Join(e.Run.Dir, "candidate.md")) {
+		return "; the last draft (NOT approved) is " + filepath.Join(e.Run.Dir, "candidate.md")
+	}
+	return ""
+}
+
+// logSpend prints running consumption after every call, so it is visible before it is too late.
+func (e *Engine) logSpend() {
+	e.logf("  spend so far: %s", SpendLine(e.State.Counters, e.State.Limits))
+}
+
+// SpendLine summarises consumption against the limits.
+func SpendLine(c run.Counters, l run.Limits) string {
+	usage := fmt.Sprintf("tokens: %d input, %d cache read, %d cache write, %d output, %d reasoning; Claude reported list-price equivalent $%.2f (not a subscription charge)",
+		c.InputTokens, c.CacheReadTokens, c.CacheWriteTokens, c.OutputTokens, c.ReasoningTokens, c.CostUSD)
+	if c.UsageIncomplete {
+		usage += " — INCOMPLETE: some attempts reported no usage"
+	}
+	return fmt.Sprintf("%d/%s call(s), %d/%s attempt(s), %.1f/%s min active (+%.1f min waiting for you); %s",
+		c.LogicalCalls, limitText(l.MaxLogicalCalls), c.Attempts, limitText(l.MaxAttempts), c.ActiveSeconds/60,
+		minutesText(l.MaxActiveSeconds), c.WaitSeconds/60, usage)
+}
+
+func limitText(n int) string {
+	if n <= 0 {
+		return "∞"
+	}
+	return fmt.Sprint(n)
+}
+
+func minutesText(s float64) string {
+	if s <= 0 {
+		return "∞"
+	}
+	return fmt.Sprintf("%.0f", s/60)
 }
 
 // deriveBudget fixes C = 2R(B+3) at the first approved outline of a generation (§7). It never
@@ -679,7 +845,12 @@ func (e *Engine) archiveWeb(ctx context.Context, r *schema.Research) *Outcome {
 	if fetch == nil {
 		fetch = fetchWeb
 	}
-	srcs, _ := fetch(ctx, e.Run.Dir, urls)
+	octx, cancel := e.opCtx(ctx)
+	srcs, _ := fetch(octx, e.Run.Dir, urls)
+	cancel()
+	if o := e.timeUp("the web sources were archived"); o != nil {
+		return o
+	}
 	if err := writeJSON(filepath.Join(e.Run.Dir, "web.json"), srcs); err != nil {
 		return e.fail("write web.json", err)
 	}
@@ -749,7 +920,10 @@ func (e *Engine) prompt(stage, role string, rev int) (string, error) {
 		}
 		return renderPrompt(stage, role, d)
 	}
-	if stage == StageIntegration {
+	if stage == StagePlan && role == "reviewer" {
+		d.DocPath = filepath.Join(e.Run.Dir, "candidate.md")
+	}
+	if stage == StageIntegration || (stage == StagePlan && role == "reviewer") {
 		reqs, err := e.requirements()
 		if err != nil {
 			return "", err
@@ -764,6 +938,9 @@ func (e *Engine) prompt(stage, role string, rev int) (string, error) {
 			}
 		}
 		d.ResearchPath = ""
+		return renderPrompt(stage, role, d)
+	}
+	if stage == StagePlan {
 		return renderPrompt(stage, role, d)
 	}
 	if role == "reviewer" {
@@ -835,6 +1012,7 @@ func (e *Engine) requirements() ([]schema.Requirement, error) {
 // ---- state transitions ----
 
 func (e *Engine) checkpoint() *Outcome {
+	e.flushActive()
 	if err := e.Run.SaveState(e.State, e.Now()); err != nil {
 		return &Outcome{Status: run.StatusFailed, Reason: "checkpoint: " + err.Error()}
 	}

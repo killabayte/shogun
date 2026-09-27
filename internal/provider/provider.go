@@ -58,6 +58,9 @@ type Result struct {
 	Dir       string          `json:"dir"` // directory of the accepted attempt
 	// ActiveSeconds is set by the caller that measured the call (not by the adapter).
 	ActiveSeconds float64 `json:"active_seconds,omitempty"`
+	// Usages holds the reported usage of every physical attempt of the call, in order — failed
+	// attempts and format corrections included. A null entry means the attempt reported none.
+	Usages []json.RawMessage `json:"usages,omitempty"`
 }
 
 // Class tells callers what to do with a failure.
@@ -83,6 +86,9 @@ type Error struct {
 	// BudgetStopped: the retry or format correction the policy allows was not attempted because
 	// Request.MaxAttempts ran out (the caller's budget, not the failure itself, ended the call).
 	BudgetStopped bool
+	// Usage is what the failed attempt reported (if anything); Usages collects every attempt.
+	Usage  json.RawMessage
+	Usages []json.RawMessage
 }
 
 func (e *Error) Error() string { return fmt.Sprintf("%s: %s", e.Class, e.Msg) }
@@ -112,6 +118,7 @@ func runAttempts(ctx context.Context, req Request, attempt attemptFunc) (*Result
 	}
 	correction, corrected := "", false
 	var last *Error
+	var usages []json.RawMessage
 	limit := MaxAttempts
 	if req.MaxAttempts > 0 && req.MaxAttempts < limit {
 		limit = req.MaxAttempts
@@ -125,15 +132,20 @@ func runAttempts(ctx context.Context, req Request, attempt attemptFunc) (*Result
 			return nil, &Error{Class: ClassConfig, Msg: "attempt directory: " + err.Error(), Attempts: n - 1}
 		}
 		res, err := attempt(ctx, dir, correction)
+		if res != nil {
+			usages = append(usages, res.Usage)
+		} else if err != nil {
+			usages = append(usages, err.Usage)
+		}
 		// A process that answers after TERM, or a result that lands after the deadline, is not accepted.
 		if c := ctxClass(ctx); c != "" {
-			return nil, &Error{Class: c, Msg: ctx.Err().Error(), Attempts: n, Dir: dir}
+			return nil, &Error{Class: c, Msg: ctx.Err().Error(), Attempts: n, Dir: dir, Usages: usages}
 		}
 		if err == nil {
-			res.Attempts, res.Dir = n, dir
+			res.Attempts, res.Dir, res.Usages = n, dir, usages
 			return res, nil
 		}
-		err.Attempts, err.Dir = n, dir
+		err.Attempts, err.Dir, err.Usages = n, dir, usages
 		last = err
 		retry := err.Class == ClassTransport || (err.Class == ClassPayload && !corrected)
 		if !retry {

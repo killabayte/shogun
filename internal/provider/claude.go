@@ -143,7 +143,9 @@ func parseClaude(stdoutPath, stderrPath string, pr procResult, req Request) (*Re
 				Model string `json:"model"`
 			}
 			json.Unmarshal(ev.Message, &m)
-			if m.Model != "" && m.Model != res.Reported.Model {
+			// "<synthetic>" messages are written by the CLI itself (e.g. "You've hit your session
+			// limit"), not by a model; the result event classifies them.
+			if m.Model != "" && m.Model != "<synthetic>" && m.Model != res.Reported.Model {
 				return nil, fail(ClassProtocol, "assistant message from %q, session model %q", m.Model, res.Reported.Model)
 			}
 		case "user":
@@ -158,6 +160,12 @@ func parseClaude(stdoutPath, stderrPath string, pr procResult, req Request) (*Re
 		return nil, fail(ClassTransport, "no result event (exit %d): %s", pr.exit, firstLine(stderr))
 	}
 	res.Finish, res.Usage = final.TerminalReason, final.ModelUsage
+	// Failures after the result event still carry the usage it reported.
+	fail := func(c Class, format string, a ...any) *Error {
+		e := fail(c, format, a...)
+		e.Usage = final.ModelUsage
+		return e
+	}
 	for _, d := range final.PermissionDenials {
 		res.Degraded = append(res.Degraded, fmt.Sprintf("permission denied: %s %s", d.ToolName, d.ToolInput))
 	}

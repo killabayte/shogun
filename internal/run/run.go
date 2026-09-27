@@ -45,6 +45,18 @@ type Counters struct {
 	Attempts      int     `json:"attempts"`
 	ReviewRounds  int     `json:"review_rounds"`
 	ActiveSeconds float64 `json:"active_seconds"`
+	// Token usage as reported by the CLIs for every physical attempt, cache categories kept apart
+	// (no subset is counted twice). Reasoning tokens are reported separately because the CLIs do not
+	// document whether output already includes them. CostUSD is Claude's reported list-price
+	// equivalent: not a subscription charge and not a share of the subscription quota.
+	InputTokens      int64   `json:"input_tokens,omitempty"` // uncached input
+	CacheReadTokens  int64   `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int64   `json:"cache_write_tokens,omitempty"`
+	OutputTokens     int64   `json:"output_tokens,omitempty"`
+	ReasoningTokens  int64   `json:"reasoning_tokens,omitempty"`
+	CostUSD          float64 `json:"cost_usd,omitempty"`
+	UsageIncomplete  bool    `json:"usage_incomplete,omitempty"` // some attempt reported no usage
+	WaitSeconds      float64 `json:"wait_seconds,omitempty"`     // time spent waiting for the user (not active)
 }
 
 // Limits are the effective budgets (0 = not yet derived).
@@ -74,6 +86,7 @@ type State struct {
 	Counters   Counters          `json:"counters"`
 	Limits     Limits            `json:"limits"`
 	Hashes     map[string]string `json:"hashes,omitempty"` // manifest, requirements revision, candidate…
+	Mode       string            `json:"mode,omitempty"`   // "" = fast path (default), "thorough" = staged pipeline
 	Progress   Progress          `json:"progress"`
 	Publish    Publication       `json:"publish"`
 	CreatedAt  string            `json:"created_at"`

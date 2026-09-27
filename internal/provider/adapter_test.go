@@ -293,3 +293,15 @@ func sameKeys(a, b map[string]bool, pathOpts ...string) bool {
 	}
 	return true
 }
+
+// The usage of a failed attempt (here: an invalid payload before the correction) is kept.
+func TestUsageOfEveryAttemptIsKept(t *testing.T) {
+	res, err, _ := runClaude(t, "badpayload,ok")
+	if err != nil || res.Attempts != 2 || len(res.Usages) != 2 || len(res.Usages[0]) == 0 || len(res.Usages[1]) == 0 {
+		t.Fatalf("usages %v, err %v", res, err)
+	}
+	_, e, _ := runClaude(t, "badpayload")
+	if e == nil || len(e.Usages) != 2 || len(e.Usages[0]) == 0 {
+		t.Fatalf("usage of failed attempts lost: %+v", e)
+	}
+}

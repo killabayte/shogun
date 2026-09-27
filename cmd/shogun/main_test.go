@@ -92,7 +92,7 @@ func TestPlanIntakeHappyPathAndStatus(t *testing.T) {
 	os.WriteFile(filepath.Join(ws, ".shogun", "config.toml"), []byte("project = \"demo\"\n"), 0o644)
 	useFakeModels(t)
 	code, out, errs := runCLI(t, ws, "plan", "Add rate limiting", "--repo", ws, "--repo", repoB, "--input", "spec.md", "--json")
-	if code != ExitOK || !strings.Contains(errs, "[intake] complete") || !strings.Contains(errs, "[integration] approved") {
+	if code != ExitOK || !strings.Contains(errs, "[intake] complete") || !strings.Contains(errs, "[plan] approved") {
 		t.Fatalf("intake: code=%d out=%q err=%q", code, out, errs)
 	}
 	var res struct {

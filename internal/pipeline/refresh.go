@@ -15,8 +15,8 @@ import (
 )
 
 // generationArtifacts are the per-generation results; a refresh moves them to gen-<n>/.
-var generationArtifacts = []string{"research", "outline", "detail", "steps", "reviews", "integration", "web", "web.json",
-	"candidate.md", "approval.json", "questions.json"}
+var generationArtifacts = []string{"plan", "research", "outline", "detail", "steps", "reviews", "integration", "web", "web.json",
+	"candidate.md", "approval.json", "questions.json", "review-notes.md"}
 
 // Refresh starts a new generation after input drift (§9): new repository snapshots and a fresh
 // research; old approvals are not inherited. Spend counters are kept, and the new generation's
@@ -49,6 +49,17 @@ func Refresh(ctx context.Context, r *run.Run, st *run.State, cfg config.Config) 
 		return err
 	}
 	c, l := st.Counters, &st.Limits
+	if st.Mode != ModeThorough {
+		// Fast path: a new generation plans again within the same total ceiling; only an explicit
+		// resume with --max-calls/--max-time raises it, and nothing switches to the staged pipeline.
+		st.Generation++
+		st.Progress = run.Progress{NextFinding: st.Progress.NextFinding, NextQuestion: st.Progress.NextQuestion}
+		st.Publish.Done = false
+		st.Hashes = map[string]string{"manifest": man.Fingerprint}
+		st.Cursor = run.Cursor{Stage: StagePlan}
+		st.Status, st.Reason = run.StatusRunning, ""
+		return nil
+	}
 	l.BaseLogicalCalls, l.BaseAttempts = c.LogicalCalls, c.Attempts
 	l.MaxLogicalCalls = c.LogicalCalls + 4*cfg.ReviewRounds
 	l.ExplicitAttempts = l.ExplicitAttempts || l.Source == "flag"

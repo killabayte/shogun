@@ -40,7 +40,10 @@ func (a *app) runners(ctx context.Context, cfg config.Config) (provider.Runner, 
 		return nil, nil, nil, err
 	}
 	fp := provider.Fingerprint(preflightItems(cfg, claudePath, claudeVer, codexPath, codexVer, features, a.getenv))
-	rec, err := provider.LoadPreflight(filepath.Join(a.cwd, ".shogun", "preflight.json"))
+	rec, err := provider.LoadPreflight(preflightPath(a.cwd, fp))
+	if err == nil && rec == nil { // a record written before per-configuration files
+		rec, err = provider.LoadPreflight(filepath.Join(a.cwd, ".shogun", "preflight.json"))
+	}
 	if err == nil {
 		err = rec.Verify(fp)
 	}
@@ -96,6 +99,7 @@ func (a *app) runPipeline(r *run.Run, st *run.State, cfg config.Config, auto, as
 	case o.Status == run.StatusPaused:
 		code = ExitLimit
 	}
+	fmt.Fprintf(a.stderr, "spend: %s\n", pipeline.SpendLine(st.Counters, st.Limits))
 	if asJSON {
 		fmt.Fprintf(a.stdout, `{"run_id":%q,"status":%q,"path":%q,"reason":%q}`+"\n", st.RunID, o.Status, path, o.Reason)
 	} else {
@@ -105,6 +109,12 @@ func (a *app) runPipeline(r *run.Run, st *run.State, cfg config.Config, auto, as
 		}
 	}
 	return code
+}
+
+// preflightPath keeps one certificate per configuration fingerprint, so certifying another model
+// pair (doctor --live --planner … --reviewer …) does not replace the configured pair's record.
+func preflightPath(workspace, fingerprint string) string {
+	return filepath.Join(workspace, ".shogun", "preflight", fingerprint[:16]+".json")
 }
 
 // projectName is the configured project, or a safe slug of the workspace directory (§3).

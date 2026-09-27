@@ -67,7 +67,7 @@ Usage:
   shogun status <run-id|dir> [--json] show run state
   shogun list [--status s] [--project p] [--dir d]   list plans in the library
   shogun verify <plan.md>             integrity of the approved area vs its receipt
-  shogun doctor [--live]              check binaries, versions, flags, config, directories
+  shogun doctor [--live] [--planner s] [--reviewer s]   check binaries, versions, config; --live certifies a model pair
   shogun config                       print the effective configuration with provenance
   shogun version
 

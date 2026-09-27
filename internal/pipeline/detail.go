@@ -363,7 +363,9 @@ func (e *Engine) mustRead(stage string, rev int, reviewer bool) []string {
 			files = append(files, filepath.Join(e.Run.Dir, "steps", id, fmt.Sprintf("%d.json", p.Accepted[id])))
 		}
 	}
-	if reviewer {
+	if reviewer && stage == StagePlan {
+		files = append(files, filepath.Join(e.Run.Dir, "candidate.md"))
+	} else if reviewer {
 		files = append(files, filepath.Join(e.Run.Dir, e.docRel(rev)))
 	} else if rev > 1 {
 		files = append(files, filepath.Join(e.Run.Dir, e.docRel(rev-1))) // the revision being revised

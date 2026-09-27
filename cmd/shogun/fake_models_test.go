@@ -32,12 +32,33 @@ func (fakeModel) Run(ctx context.Context, req provider.Request) (*provider.Resul
 		switch {
 		case strings.Contains(req.Prompt, "stage OUTLINE"):
 			target = "S-001"
-		case strings.Contains(req.Prompt, "stage DETAIL"), strings.Contains(req.Prompt, "FINAL review"):
+		case strings.Contains(req.Prompt, "stage DETAIL"), strings.Contains(req.Prompt, "FINAL review"), strings.Contains(req.Prompt, "Review the complete plan"):
 			target, refs = "S-001", []string{"S-001/V-001"}
 		}
 		doc = map[string]any{"schema_version": 1, "verdict": "approve", "summary": "ok", "findings": []any{}, "dispositions": []any{},
 			"coverage":           []any{map[string]any{"requirement_id": "R-001", "criterion_ids": []string{"R-001.C1"}, "target_ids": []string{target}, "verification_refs": refs, "status": "covered"}},
 			"source_assessments": []any{}, "questions": []any{}}
+	case strings.Contains(s, `"facts"`) && strings.Contains(s, `"approach"`): // the whole plan (fast path)
+		var cov []any
+		for _, m := range reSourceLine.FindAllStringSubmatch(req.Prompt, -1) {
+			cov = append(cov, map[string]any{"source_id": m[1], "studied": "x", "relevant": nil, "relevance": "relevant", "notes": ""})
+		}
+		for _, c := range cov {
+			delete(c.(map[string]any), "relevant")
+		}
+		questions := []any{}
+		if askFirst && !strings.Contains(req.Prompt, "→ semver") {
+			questions = append(questions, map[string]any{"id": "Q-001", "question": "Semver or date?", "why": "w", "impact": "i", "options": []string{"semver", "date"}, "proposed_assumption": "", "blocking": true})
+		}
+		doc = map[string]any{"schema_version": 1,
+			"facts":           []any{map[string]any{"id": "FACT-001", "source_id": "task", "location": "task", "quote": "q", "kind": "observation", "text": "t"}},
+			"requirements":    []any{map[string]any{"id": "R-001", "statement": "s", "source_ids": []string{"task"}, "type": "functional", "mandatory": true, "criteria": []any{map[string]any{"id": "R-001.C1", "text": "c"}}}},
+			"source_coverage": cov, "web_sources": []any{}, "approach": map[string]any{"summary": "s", "alternatives": []any{}},
+			"steps": []any{map[string]any{"id": "S-001", "title": "t", "objective": "o", "requirement_ids": []string{"R-001"}, "criterion_ids": []string{"R-001.C1"},
+				"depends_on": []string{}, "targets": []any{map[string]any{"repo_id": "repo-1", "path": "a.go", "operation": "modify"}},
+				"actions": []string{"edit a.go"}, "verification": []any{map[string]any{"id": "V-001", "repo_id": "repo-1", "method": "command", "expected": "ok"}},
+				"risks": []any{}, "rollback_or_why_not_applicable": "git revert"}},
+			"final_verification_criterion_ids": []string{}, "questions": questions, "requested_changes": []any{}, "responses_to_findings": []any{}}
 	case strings.Contains(s, `"rollback_or_why_not_applicable"`):
 		doc = map[string]any{"schema_version": 1, "questions": []any{}, "requested_changes": []any{}, "responses_to_findings": []any{},
 			"steps": []any{map[string]any{"id": "S-001", "title": "t", "objective": "o", "requirement_ids": []string{"R-001"}, "criterion_ids": []string{"R-001.C1"},
@@ -100,7 +121,7 @@ func TestPlanNeedsInputThenResumeWithAnswers(t *testing.T) {
 	os.WriteFile(filepath.Join(outside, "versioning.md"), []byte("use semver\n"), 0o600)
 	os.WriteFile(answers, []byte(`{"schema_version":1,"answers":[{"question_id":"Q-001","answer":"semver","files":["`+filepath.Join(outside, "versioning.md")+`"]}]}`), 0o600)
 	code, _, errs = runCLI(t, ws, "resume", res.RunID, "--answers", answers)
-	if code != ExitOK || !strings.Contains(errs, "[integration] approved") || !strings.Contains(errs, "1 answer(s) recorded") {
+	if code != ExitOK || !strings.Contains(errs, "[plan] approved") || !strings.Contains(errs, "1 answer(s) recorded") {
 		t.Fatalf("resume: %d %q", code, errs)
 	}
 	if code, out, _ := runCLI(t, ws, "status", res.RunID); code != ExitOK || !strings.Contains(out, "status:     approved") {
@@ -112,7 +133,7 @@ func TestPlanNeedsInputThenResumeWithAnswers(t *testing.T) {
 	if !strings.Contains(string(man), `"ans-1"`) || !strings.Contains(errs, "versioning.md → answers-1/") {
 		t.Fatalf("answer file not attached: %s", man)
 	}
-	prompts, _ := filepath.Glob(filepath.Join(runDir, "calls", "*-research-planner", "prompt.md"))
+	prompts, _ := filepath.Glob(filepath.Join(runDir, "calls", "*-plan-planner", "prompt.md"))
 	last, _ := os.ReadFile(prompts[len(prompts)-1])
 	if !strings.Contains(string(last), "- ans-1: ") {
 		t.Fatalf("answer file not in the prompt:\n%s", last)
@@ -142,5 +163,19 @@ func TestConcurrentResumeIsRefused(t *testing.T) {
 	code, _, errs := runCLI(t, ws, "resume", res.RunID)
 	if code != ExitError || !strings.Contains(errs, "lock") {
 		t.Fatalf("concurrent resume: %d %q", code, errs)
+	}
+}
+
+// doctor certifies the pair given by --planner/--reviewer (as plan would use it), not only the
+// configured one; the reviewer's effort floor still applies.
+func TestDoctorTakesModelOverrides(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ws := t.TempDir()
+	_, out, _ := runCLI(t, ws, "doctor", "--planner", "claude/opus:xhigh", "--reviewer", "codex/gpt-6-sol:high")
+	if !strings.Contains(out, "planner=claude/opus:xhigh reviewer=codex/gpt-6-sol:high") {
+		t.Fatalf("doctor ignored the overrides:\n%s", out)
+	}
+	if _, out, _ := runCLI(t, ws, "doctor", "--reviewer", "codex/gpt-6-sol:low"); !strings.Contains(out, "FAIL config") {
+		t.Fatalf("effort floor not enforced:\n%s", out)
 	}
 }

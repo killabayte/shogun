@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func passingRecord(fp string) *Preflight {
@@ -151,5 +152,22 @@ func TestRedirectsTo(t *testing.T) {
 		if got := redirectsTo(cmd, tg); got != want {
 			t.Errorf("%s: got %v, want %v", cmd, got, want)
 		}
+	}
+}
+
+// Once the shared preflight allowance is gone, the next model is not started and nothing is
+// certified.
+func TestPreflightStopsWhenAllowanceIsUsed(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+	time.Sleep(time.Millisecond)
+	counted := &costRound2RetryRunner{}
+	checks, spend := RunPreflightSpend(ctx, counted, counted, Request{}, Request{}, t.TempDir())
+	if counted.attempts != 0 || spend.Attempts != 0 {
+		t.Fatalf("a model was started after the allowance: %d", counted.attempts)
+	}
+	rec := &Preflight{Version: PreflightVersion, Fingerprint: "f", Checks: checks}
+	if err := rec.Verify("f"); err == nil {
+		t.Fatal("certified without running")
 	}
 }

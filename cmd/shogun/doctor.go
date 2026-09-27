@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/killabayte/shogun/internal/config"
+	"github.com/killabayte/shogun/internal/pipeline"
 	"github.com/killabayte/shogun/internal/provider"
+	"github.com/killabayte/shogun/internal/run"
 )
 
 type check struct {
@@ -26,13 +28,15 @@ type check struct {
 func (a *app) cmdDoctor(args []string) int {
 	fs := a.newFlagSet("doctor")
 	live := fs.Bool("live", false, "also run one short control call per model and record the config preflight")
+	planner := fs.String("planner", "", "certify this planner instead of the configured one (claude/<model>:<effort>)")
+	reviewer := fs.String("reviewer", "", "certify this reviewer instead of the configured one (codex/<model>:<effort>)")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}
 	var checks []check
 	add := func(name string, ok bool, detail string) { checks = append(checks, check{name, ok, detail}) }
 
-	loaded, err := config.Load(a.cwd, config.Overrides{}, a.getenv)
+	loaded, err := config.Load(a.cwd, config.Overrides{Planner: *planner, Reviewer: *reviewer}, a.getenv)
 	if err != nil {
 		add("config", false, err.Error())
 	} else {
@@ -86,7 +90,7 @@ func (a *app) cmdDoctor(args []string) int {
 	}
 	items := preflightItems(cfg, claudePath, claudeVer, codexPath, codexVer, features, a.getenv)
 	fp := provider.Fingerprint(items)
-	recPath := filepath.Join(a.cwd, ".shogun", "preflight.json")
+	recPath := preflightPath(a.cwd, fp)
 	if !*live {
 		rec, err := provider.LoadPreflight(recPath)
 		status := "certified for this configuration"
@@ -136,8 +140,12 @@ func (a *app) livePreflight(cfg config.Config, claudePath, codexPath, fp string,
 		return ExitError
 	}
 	fmt.Fprintf(a.stdout, "live preflight: one control call per model (traces in %s)\n", dir)
-	checks := provider.RunPreflight(a.ctx, &provider.Claude{Bin: claudePath}, &provider.Codex{Bin: codexPath},
+	fmt.Fprintf(a.stdout, "limits: 1 physical attempt per model, %s in total\n", provider.PreflightDeadline)
+	checks, spend := provider.RunPreflightSpend(a.ctx, &provider.Claude{Bin: claudePath}, &provider.Codex{Bin: codexPath},
 		plannerRequest(cfg), reviewerRequest(cfg), dir)
+	c := run.Counters{LogicalCalls: 2, Attempts: spend.Attempts, ActiveSeconds: spend.Seconds}
+	pipeline.AddUsages(&c, spend.Usages)
+	defer fmt.Fprintf(a.stdout, "spend: %s\n", pipeline.SpendLine(c, run.Limits{MaxLogicalCalls: 2, MaxAttempts: 2, MaxActiveSeconds: provider.PreflightDeadline.Seconds()}))
 	rec := &provider.Preflight{Version: provider.PreflightVersion, Fingerprint: fp, Items: items, CreatedAt: time.Now().UTC().Format(time.RFC3339), Checks: checks}
 	for _, c := range checks {
 		fmt.Fprintf(a.stdout, "%-10s %-6s/%-12s %s\n", c.Verdict, c.Provider, c.Name, c.Detail)

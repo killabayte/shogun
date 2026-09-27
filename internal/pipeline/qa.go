@@ -138,7 +138,11 @@ func (e *Engine) resolveQuestions(ctx context.Context) *Outcome {
 			return e.fail("decisions", err)
 		}
 	} else {
+		e.flushActive()
+		waitStart := time.Now()
 		answers, err := e.Asker.Ask(ctx, p.Pending)
+		e.State.Counters.WaitSeconds += time.Since(waitStart).Seconds()
+		e.segStart = time.Now() // waiting for the user is not active time
 		if err != nil {
 			return e.fail("questions", err)
 		}

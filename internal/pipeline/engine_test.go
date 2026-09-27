@@ -221,9 +221,11 @@ func newFixture(t *testing.T, planner, reviewer []reply) *fixture {
 	os.WriteFile(filepath.Join(r.Dir, "task.md"), []byte("Add a --version flag"), 0o600)
 	cfg := config.Default()
 	cfg.ReviewRounds, cfg.CallDeadline = 6, time.Minute
+	cfg.Planner, _ = config.ParseModelSpec("claude/fable:xhigh") // the pair the recorded traces and fakes were taken with
 	st := run.NewState("20260926-000000-test-abcd", time.Now())
 	st.Limits = run.Limits{MaxLogicalCalls: 4 * cfg.ReviewRounds, MaxAttempts: 12 * cfg.ReviewRounds, Source: "pre-outline"}
 	f := &fixture{planner: &script{t: t, name: "planner", replies: planner}, reviewer: &script{t: t, name: "reviewer", replies: reviewer}}
+	st.Mode = ModeThorough // these tests exercise the staged pipeline; fast_test.go covers the default
 	st.Publish.Path = filepath.Join(ws, "docs", "plans", "20260926-000000-test-abcd.md")
 	exclude := []string{st.Publish.Path, library.ReceiptPath(st.Publish.Path)}
 	repo, err := inputs.RepoManifest(context.Background(), "repo-1", ws, exclude...)

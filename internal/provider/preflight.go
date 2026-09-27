@@ -128,24 +128,64 @@ var preflightSchema = []byte(`{"type":"object","additionalProperties":false,"req
 // checks. Evidence comes from the CLI trace and the host file system, never from the model's words
 // alone: a missing required event is "unverified", not "pass".
 func RunPreflight(ctx context.Context, claude Runner, codex Runner, planner, reviewer Request, dir string) []Check {
+	checks, _ := RunPreflightSpend(ctx, claude, codex, planner, reviewer, dir)
+	return checks
+}
+
+// PreflightDeadline caps the whole live preflight (both models together).
+const PreflightDeadline = 5 * time.Minute
+
+// PreflightSpend is what a live preflight consumed.
+type PreflightSpend struct {
+	Attempts int
+	Seconds  float64
+	Usages   []json.RawMessage
+}
+
+// RunPreflightSpend is RunPreflight that also reports its spend. Each model gets exactly one
+// physical attempt (no retries, no format correction), and both share one deadline — the context's,
+// or PreflightDeadline. The second model is not started once that allowance is gone.
+func RunPreflightSpend(ctx context.Context, claude Runner, codex Runner, planner, reviewer Request, dir string) ([]Check, PreflightSpend) {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, PreflightDeadline)
+		defer cancel()
+	}
+	deadline, _ := ctx.Deadline()
 	var checks []Check
+	var spend PreflightSpend
+	start := time.Now()
 	for _, side := range []struct {
 		provider string
 		runner   Runner
 		req      Request
 	}{{"claude", claude, planner}, {"codex", codex, reviewer}} {
-		checks = append(checks, preflightOne(ctx, side.provider, side.runner, side.req, filepath.Join(dir, side.provider))...)
+		if ctx.Err() != nil {
+			for _, name := range []string{"call", "reads", "no-write", "write-denied"} {
+				if name == "write-denied" && side.provider != "codex" {
+					continue
+				}
+				checks = append(checks, Check{Provider: side.provider, Name: name, Verdict: "unverified", Detail: "not started: the preflight time allowance was used up"})
+			}
+			continue
+		}
+		side.req.MaxAttempts, side.req.Deadline = 1, deadline
+		c, attempts, usages := preflightOne(ctx, side.provider, side.runner, side.req, filepath.Join(dir, side.provider))
+		checks = append(checks, c...)
+		spend.Attempts += attempts
+		spend.Usages = append(spend.Usages, usages...)
 	}
-	return checks
+	spend.Seconds = time.Since(start).Seconds()
+	return checks, spend
 }
 
-func preflightOne(ctx context.Context, provider string, r Runner, req Request, dir string) []Check {
+func preflightOne(ctx context.Context, provider string, r Runner, req Request, dir string) ([]Check, int, []json.RawMessage) {
 	add := func(name, verdict, detail string) Check {
 		return Check{Provider: provider, Name: name, Verdict: verdict, Detail: detail}
 	}
 	fx, words, err := makeFixture(filepath.Join(dir, "fx"))
 	if err != nil {
-		return []Check{add("call", "fail", err.Error())}
+		return []Check{add("call", "fail", err.Error())}, 0, nil
 	}
 	target := filepath.Join(fx, "repo-a", "PROBE_WRITE.txt")
 	before, _ := treeHash(fx)
@@ -154,9 +194,17 @@ func preflightOne(ctx context.Context, provider string, r Runner, req Request, d
 	req.Schema = preflightSchema
 	req.Prompt = fmt.Sprintf(preflightPrompt, filepath.Join(fx, "repo-a/a.txt"), filepath.Join(fx, "repo-b/b.txt"), filepath.Join(fx, "inputs/spec.md"), target)
 	if req.Deadline.IsZero() {
-		req.Deadline = time.Now().Add(10 * time.Minute)
+		req.Deadline = time.Now().Add(PreflightDeadline)
 	}
 	res, err := r.Run(ctx, req)
+	attempts, usages := 1, []json.RawMessage(nil)
+	var perr *Error
+	switch {
+	case res != nil:
+		attempts, usages = res.Attempts, res.Usages
+	case errors.As(err, &perr):
+		attempts, usages = perr.Attempts, perr.Usages
+	}
 	after, _ := treeHash(fx)
 	_, statErr := os.Stat(target)
 	var out []Check
@@ -166,7 +214,7 @@ func preflightOne(ctx context.Context, provider string, r Runner, req Request, d
 		out = append(out, add("no-write", "pass", "fixture unchanged, "+filepath.Base(target)+" absent"))
 	}
 	if err != nil {
-		return append(out, add("call", "fail", err.Error()), add("reads", "unverified", "no result"), add("write-denied", "unverified", "no result"))
+		return append(out, add("call", "fail", err.Error()), add("reads", "unverified", "no result"), add("write-denied", "unverified", "no result")), attempts, usages
 	}
 	out = append(out, add("call", "pass", fmt.Sprintf("reported %+v", res.Reported)))
 	var raw struct {
@@ -188,7 +236,7 @@ func preflightOne(ctx context.Context, provider string, r Runner, req Request, d
 			out = append(out, add("write-denied", "unverified", "no denied write to the probe file was recorded; the sandbox was not exercised"))
 		}
 	}
-	return out
+	return out, attempts, usages
 }
 
 var (
