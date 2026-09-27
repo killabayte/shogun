@@ -171,6 +171,7 @@ func TestPlanNeedsInputAndConfigErrors(t *testing.T) {
 func TestConfigCommandShowsProvenance(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "") // GitHub's ubuntu runners set it; the test uses ~/.config
 	ws := t.TempDir()
 	os.MkdirAll(filepath.Join(home, ".config", "shogun"), 0o755)
 	os.WriteFile(filepath.Join(home, ".config", "shogun", "config.toml"), []byte("plans_dir = \"~/plans\"\n"), 0o644)
