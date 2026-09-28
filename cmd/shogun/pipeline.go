@@ -157,21 +157,38 @@ func (t *terminalAsker) Ask(ctx context.Context, qs []run.Pending) (map[string]s
 		if q.ProposedAssumption != "" {
 			fmt.Fprintf(t.out, "  recommended: %s (press Enter to accept)\n", q.ProposedAssumption)
 		}
-		fmt.Fprint(t.out, "> ")
-		line, err := t.in.ReadString('\n')
-		if err != nil && line == "" {
-			return nil, fmt.Errorf("reading the answer to %s: %v", q.ID, err)
-		}
-		line = strings.TrimSpace(line)
-		if n := optionNumber(line, len(q.Options)); n > 0 {
-			line = q.Options[n-1]
-		}
-		if line == "" { // Enter explicitly accepts the recommendation; without one it stays unanswered
-			line = q.ProposedAssumption
+		var line string
+		for try := 1; ; try++ {
+			fmt.Fprint(t.out, "> ")
+			l, err := t.in.ReadString('\n')
+			if err != nil && l == "" {
+				return nil, fmt.Errorf("reading the answer to %s: %v", q.ID, err)
+			}
+			line = strings.TrimSpace(l)
+			if n := optionNumber(line, len(q.Options)); n > 0 {
+				line = q.Options[n-1]
+			}
+			if line == "" { // Enter explicitly accepts the recommendation; without one it stays unanswered
+				line = q.ProposedAssumption
+			}
+			// A closed question takes only one of its options: ask again here, before any model call.
+			if !q.Closed || try == 3 || closedOption(q.Options, line) {
+				break
+			}
+			fmt.Fprintf(t.out, "  answer with one of the numbers 1-%d or an option's exact text\n", len(q.Options))
 		}
 		answers[q.ID] = line
 	}
 	return answers, nil
+}
+
+func closedOption(options []string, s string) bool {
+	for _, o := range options {
+		if strings.EqualFold(strings.Join(strings.Fields(o), " "), strings.Join(strings.Fields(s), " ")) {
+			return true
+		}
+	}
+	return false
 }
 
 func optionNumber(s string, n int) int {

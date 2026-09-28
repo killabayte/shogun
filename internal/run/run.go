@@ -145,6 +145,7 @@ type Pending struct {
 	Options            []string `json:"options"`
 	ProposedAssumption string   `json:"proposed_assumption"`
 	Blocking           bool     `json:"blocking"`
+	Closed             bool     `json:"closed,omitempty"` // only one of Options (its text or number) is an answer
 }
 
 // Run is an opened run directory. Hold the lock for the whole lifetime of a writer.

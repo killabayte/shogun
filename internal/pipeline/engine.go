@@ -589,7 +589,7 @@ func askAgain(p *run.Progress, stage string, q schema.Question) {
 	}
 	p.NextQuestion++
 	p.Pending = append(p.Pending, run.Pending{ID: fmt.Sprintf("Q-%03d", p.NextQuestion), Stage: stage, Origin: "shogun",
-		Question: q.Question, Why: q.Why, Impact: q.Impact, Options: q.Options, Blocking: true})
+		Question: q.Question, Why: q.Why, Impact: q.Impact, Options: q.Options, Blocking: true, Closed: true})
 }
 
 func (e *Engine) webRecords() []inputs.Source {

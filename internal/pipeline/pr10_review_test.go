@@ -31,8 +31,13 @@ func TestPR10ReviewSourceAnswerIsNotASourceWideWaiver(t *testing.T) {
 				QuestionID: f.e.State.Progress.Pending[0].ID,
 				Answer:     "Follow the task only for the obsolete damaged-run field shape. Retain and verify every other requirement in draft.md.",
 			}}}
+			// Round 2 (PR10-03): a closed question refuses this scoped answer on receipt, so it can
+			// never become a waiver; the question stays open and nothing is approved.
 			if err := ApplyAnswers(f.e.Run, f.e.State, a, time.Now()); err != nil {
-				t.Fatal(err)
+				if len(f.e.State.Progress.Pending) != 1 || f.e.State.Status == run.StatusApproved {
+					t.Fatalf("a refused answer changed the run: %v pending=%d status=%s", err, len(f.e.State.Progress.Pending), f.e.State.Status)
+				}
+				return
 			}
 			if o := f.execute(t); o.Status == run.StatusApproved {
 				v, note := library.Verify(f.e.State.Publish.Path)
