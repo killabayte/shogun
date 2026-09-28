@@ -203,3 +203,17 @@ func TestReviewerPromptsCarryTheMaterialityRule(t *testing.T) {
 		t.Fatal("the rendered review prompt lacks the rule")
 	}
 }
+
+// Live 2026-09-28 (two self-runs): a planner assumption made an exception to the task and the
+// reviewer let it pass. Both roles are told that an assumption fills only what the task leaves open,
+// and the reviewer that a contradicting assumption is a major finding.
+func TestPromptsBindAssumptionsToTheTask(t *testing.T) {
+	f := newFast(t, []reply{fixed(planDoc([]req{r1}, s1))}, []reply{fixed(finalReview("approve", nil, s1))})
+	f.execute(t)
+	if !strings.Contains(f.planner.prompts[0], "never weakens a requirement of the task or makes an exception to one") {
+		t.Error("the planner is not told what an assumption may not do")
+	}
+	if !strings.Contains(f.reviewer.prompts[0], "Check every assumption") || !strings.Contains(f.reviewer.prompts[0], "is a major finding: ask for the plan to follow the task") {
+		t.Error("the reviewer is not told to check assumptions against the task")
+	}
+}
