@@ -16,5 +16,5 @@ Accepted steps this batch depends on:
 - findings: new problems with id null; to restate an open finding use its id. severity blocker|major|minor, target_id, problem, evidence, requested_change. Do not raise findings for ideas beyond scope.
 - dispositions: one per open finding listed above: resolved|retained|rejected with reason and evidence.
 - coverage: exactly one row per requirement below, with exactly these criteria: {{range $i, $r := .Expected}}{{if $i}}; {{end}}{{$r}}{{end}}. target_ids = the step ids of this batch that meet them; verification_refs = "S-NNN/V-NNN" of those steps; status covered|partial|missing.
-- source_assessments: may be empty. questions: only material unknowns.
+{{template "provers" .}}- source_assessments: may be empty. questions: only material unknowns.
 {{template "language" .}} Reply with the structured output only.

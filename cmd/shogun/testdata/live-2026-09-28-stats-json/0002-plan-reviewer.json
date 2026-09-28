@@ -1,0 +1,96 @@
+{
+ "coverage": [
+  {
+   "criterion_ids": [
+    "R-001.C1"
+   ],
+   "requirement_id": "R-001",
+   "status": "covered",
+   "target_ids": [
+    "S-001",
+    "S-002"
+   ],
+   "verification_refs": [
+    "S-002/V-003"
+   ]
+  },
+  {
+   "criterion_ids": [
+    "R-002.C1",
+    "R-002.C2"
+   ],
+   "requirement_id": "R-002",
+   "status": "partial",
+   "target_ids": [
+    "S-001",
+    "S-002"
+   ],
+   "verification_refs": [
+    "S-002/V-003"
+   ]
+  },
+  {
+   "criterion_ids": [
+    "R-003.C1"
+   ],
+   "requirement_id": "R-003",
+   "status": "covered",
+   "target_ids": [
+    "S-001",
+    "S-002"
+   ],
+   "verification_refs": [
+    "S-002/V-003"
+   ]
+  },
+  {
+   "criterion_ids": [
+    "R-004.C1"
+   ],
+   "requirement_id": "R-004",
+   "status": "covered",
+   "target_ids": [
+    "S-001",
+    "S-002"
+   ],
+   "verification_refs": [
+    "S-001/V-002",
+    "S-002/V-003"
+   ]
+  },
+  {
+   "criterion_ids": [
+    "R-005.C1"
+   ],
+   "requirement_id": "R-005",
+   "status": "covered",
+   "target_ids": [
+    "S-002"
+   ],
+   "verification_refs": [
+    "S-002/V-003"
+   ]
+  }
+ ],
+ "dispositions": [],
+ "findings": [
+  {
+   "evidence": [
+    "The original task specifies one object per run containing the listed fields, including usage state, plus the damage reason for a damaged run.",
+    "Q-001's proposed shape makes only damaged optional; R-002 likewise says each object has the listed fields.",
+    "candidate.md, FACT-013 and S-001 actions 2–3, instead omit every field except id, status and damaged for damaged runs. S-002 action 3 explicitly tests that attempts is absent.",
+    "cmd/shogun/stats.go:70–73 represents unavailable damaged-run values with '-' cells; it does not remove their columns."
+   ],
+   "id": null,
+   "problem": "Damaged-run objects omit required per-run fields. Executing the plan would produce a different object shape for damaged runs, without mode, models, counters, cost or usage state, contradicting R-002 and the proposed Q-001 shape.",
+   "requested_change": "Keep the declared fields on damaged-run objects, representing unavailable values explicitly, for example with null rather than fabricated zero counters. Revise FACT-013, the JSON types and the damaged-run assertions accordingly.",
+   "severity": "major",
+   "target_id": "S-001"
+  }
+ ],
+ "questions": [],
+ "schema_version": 1,
+ "source_assessments": [],
+ "summary": "The plan otherwise covers the flag, totals, unchanged text output and read-only behavior. Revise the damaged-run schema to preserve the required fields.",
+ "verdict": "revise"
+}

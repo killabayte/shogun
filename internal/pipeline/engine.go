@@ -940,6 +940,11 @@ func (e *Engine) prompt(stage, role string, rev int) (string, error) {
 				d.Expected = append(d.Expected, r.ID+" ("+strings.Join(cs, ", ")+")")
 			}
 		}
+		pd, err := e.loadPlanData()
+		if err != nil {
+			return "", err
+		}
+		d.Provers = planProvers(pd).lines()
 		d.ResearchPath = ""
 		return renderPrompt(stage, role, d)
 	}

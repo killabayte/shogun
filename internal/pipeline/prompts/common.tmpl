@@ -43,6 +43,12 @@ The plan contains only the work needed for the agreed result while honouring the
 A blocker or major finding names three things: the requirement, constraint or explicit input it violates (an R- or criterion id, the task text, or a cited source); the evidence (file:line, quoted task text or source); and the concrete consequence if the plan were executed as written. A finding that cannot name all three is minor at most. A missing requirement and work the task does not ask for stay material. Style, wording, structure and equally good alternatives are preferences: minor at most. An unknown that would change the plan is a question for the user, not a finding.
 {{end}}
 
+{{define "provers"}}{{if .Provers}}
+  Which steps carry each criterion in the document under review (a criterion's verification_refs must come from these; do not recompute it):
+{{range .Provers}}  - {{.}}
+{{end}}  The map lists the permitted links only. Whether a verification actually proves its criterion is your judgement: a listed link alone does not make a row covered.
+{{end}}{{end}}
+
 {{define "language"}}Write all prose in {{if .Lang}}{{.Lang}}{{else}}the language of the task{{end}}. Machine ids (R-001, R-001.C1, S-001, F-001, Q-001, repo-1, in-1) are never translated.{{end}}
 
 {{define "questions"}}

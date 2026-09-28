@@ -35,6 +35,7 @@ type promptData struct {
 	DocPath      string   // reviewer: the revision under review
 	ResearchPath string   // outline: the approved research
 	Expected     []string // reviewer: requirement ids (detail: with their criteria) that need a coverage row
+	Provers      []string // reviewer: "criterion → steps / final" that may prove it, from the gate's own map
 	// detail
 	OutlinePath  string
 	Batch        []stepRef // the steps to detail now

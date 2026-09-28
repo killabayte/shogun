@@ -45,14 +45,22 @@ func loadReplay(t *testing.T, dir string, names ...string) *replay {
 	return r
 }
 
-// Live 2026-09-27 (P6 self-run, stats --json): the reviewer approved revision 2 citing only the test
-// step's verifications for criteria that the implementation step also carries; the per-step gate
-// paused the run at the round cap. Replayed offline, the same four answers publish a valid plan.
-func TestReplayStatsJSONSelfRunPublishes(t *testing.T) {
+// Live P6 self-runs (stats --json), each paused at the round cap after the reviewer approved revision
+// 2. 2026-09-27: the reviewer cited only the test step's verifications for criteria the
+// implementation step also carries (the per-step gate). 2026-09-28: the reviewer listed the
+// implementation step as an extra target of the read-only constraint only the test step carries,
+// with the correct verification cited. Replayed offline, both sets of four answers publish a plan
+// that verifies as valid.
+func TestReplayStatsJSONSelfRunsPublish(t *testing.T) {
+	for _, run := range []string{"live-2026-09-27-stats-json", "live-2026-09-28-stats-json"} {
+		t.Run(run, func(t *testing.T) { replayPublishes(t, filepath.Join("testdata", run)) })
+	}
+}
+
+func replayPublishes(t *testing.T, data string) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", "")
 	ws := gitRepo(t)
-	data := filepath.Join("testdata", "live-2026-09-27-stats-json")
 	planner := loadReplay(t, data, "0001-plan-planner", "0003-plan-planner")
 	reviewer := loadReplay(t, data, "0002-plan-reviewer", "0004-plan-reviewer")
 	old := runnersHook
