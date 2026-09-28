@@ -212,12 +212,19 @@ func TestListAndVerify(t *testing.T) {
 	}
 }
 
-// Only a tag's module version names the release; pseudo-versions and dirty builds keep the default.
-func TestReleaseVersionPattern(t *testing.T) {
-	for v, want := range map[string]bool{"v0.1.0": true, "v0.2.0-rc.1": true, "(devel)": false,
-		"v0.0.0-20260927094013-23bc6f6abcde": false, "v0.1.1-0.20260927094013-23bc6f6abcde": false, "v0.1.0+dirty": false} {
-		if reRelease.MatchString(v) != want {
-			t.Errorf("%s: want %v", v, want)
+// The version comes from the release tag when make sets it, else from the module version Go records
+// (a tag for go install @vX, a pseudo-version after the last tag otherwise), never a stale constant.
+func TestVersionFrom(t *testing.T) {
+	for _, c := range []struct{ set, module, want string }{
+		{"0.2.1", "v0.2.1", "0.2.1"},
+		{"", "v0.2.1", "0.2.1"},
+		{"", "v0.2.1-0.20260928074837-d85b371d6d65", "0.2.1-0.20260928074837-d85b371d6d65"},
+		{"", "v0.2.1-0.20260928074837-d85b371d6d65+dirty", "0.2.1-0.20260928074837-d85b371d6d65+dirty"},
+		{"", "(devel)", "dev"},
+		{"", "", "dev"},
+	} {
+		if got := versionFrom(c.set, c.module); got != c.want {
+			t.Errorf("versionFrom(%q, %q) = %q, want %q", c.set, c.module, got, c.want)
 		}
 	}
 }
