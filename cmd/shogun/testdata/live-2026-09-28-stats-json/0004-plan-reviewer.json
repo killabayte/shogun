@@ -1,0 +1,96 @@
+{
+ "coverage": [
+  {
+   "criterion_ids": [
+    "R-001.C1"
+   ],
+   "requirement_id": "R-001",
+   "status": "covered",
+   "target_ids": [
+    "S-001",
+    "S-002"
+   ],
+   "verification_refs": [
+    "S-002/V-003"
+   ]
+  },
+  {
+   "criterion_ids": [
+    "R-002.C1",
+    "R-002.C2",
+    "R-002.C3"
+   ],
+   "requirement_id": "R-002",
+   "status": "covered",
+   "target_ids": [
+    "S-001",
+    "S-002"
+   ],
+   "verification_refs": [
+    "S-001/V-002",
+    "S-002/V-003"
+   ]
+  },
+  {
+   "criterion_ids": [
+    "R-003.C1"
+   ],
+   "requirement_id": "R-003",
+   "status": "covered",
+   "target_ids": [
+    "S-001",
+    "S-002"
+   ],
+   "verification_refs": [
+    "S-002/V-003"
+   ]
+  },
+  {
+   "criterion_ids": [
+    "R-004.C1"
+   ],
+   "requirement_id": "R-004",
+   "status": "covered",
+   "target_ids": [
+    "S-001",
+    "S-002"
+   ],
+   "verification_refs": [
+    "S-001/V-002",
+    "S-002/V-003"
+   ]
+  },
+  {
+   "criterion_ids": [
+    "R-005.C1"
+   ],
+   "requirement_id": "R-005",
+   "status": "covered",
+   "target_ids": [
+    "S-001",
+    "S-002"
+   ],
+   "verification_refs": [
+    "S-002/V-003"
+   ]
+  }
+ ],
+ "dispositions": [
+  {
+   "evidence": [
+    "candidate.md: FACT-013 explicitly requires all declared fields on damaged runs, with null for unavailable values.",
+    "candidate.md: S-001 actions 2–3 specify pointer fields without omitempty and preserve the damaged reason.",
+    "candidate.md: S-002 action 5 checks field presence on every run and null values on the damaged run."
+   ],
+   "finding_id": "F-001",
+   "reason": "The revised schema, implementation instructions and assertions resolve the damaged-run field omission and fully cover R-002.",
+   "status": "resolved"
+  }
+ ],
+ "findings": [],
+ "questions": [],
+ "schema_version": 1,
+ "source_assessments": [],
+ "summary": "The revised plan covers the original task and follows the stated assumptions. Cited repository sources support its approach. No material findings remain. No files were changed or planned commands executed.",
+ "verdict": "approve"
+}

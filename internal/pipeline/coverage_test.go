@@ -83,3 +83,46 @@ func TestFastPathApprovesWhenOneCarrierProvesTheCriterion(t *testing.T) {
 		t.Fatalf("%+v\n%s", o, f.log.String())
 	}
 }
+
+// Live 2026-09-28: an extra existing target with no cited verification adds nothing and does not
+// block; citing that target's verification for a criterion it does not carry still blocks, and a
+// target never becomes a carrier by being listed.
+func TestCoverageExtraTargetWithoutVerification(t *testing.T) {
+	p := provided("R-005.C1", "S-002", "R-001.C1", "S-001")
+	if notes := associations(covRow("R-005", []string{"R-005.C1"}, []string{"S-001", "S-002"}, []string{"S-002/V-003"}), p); len(notes) != 0 {
+		t.Fatalf("an extra target blocked: %v", notes)
+	}
+	notes := associations(covRow("R-005", []string{"R-005.C1"}, []string{"S-001", "S-002"}, []string{"S-001/V-002"}), p)
+	if len(notes) != 2 || !strings.Contains(notes[0], "verification S-001/V-002 of something that carries none of its criteria") ||
+		!strings.Contains(notes[1], "no cited verification proves R-005.C1 (it can be proved by S-002)") {
+		t.Fatalf("the extra target's verification was accepted: %v", notes)
+	}
+}
+
+// The reviewer is given the gate's own criterion map, with the reminder that a link is not proof.
+func TestReviewPromptCarriesTheCriterionMap(t *testing.T) {
+	s2 := step{"S-002", []string{"R-001.C1"}}
+	f := newFast(t, []reply{fixed(planDoc([]req{r1}, s1, s2))}, []reply{fixed(finalReview("approve", nil, s1))})
+	f.execute(t)
+	p := f.reviewer.prompts[0]
+	if !strings.Contains(p, "  - R-001.C1 → S-001, S-002\n") || !strings.Contains(p, "a listed link alone does not make a row covered") {
+		t.Fatalf("criterion map missing from the review prompt:\n%s", p)
+	}
+}
+
+// --thorough: the detail reviewer gets the batch's map and the integration reviewer the plan's.
+func TestThoroughReviewPromptsCarryTheCriterionMap(t *testing.T) {
+	s := step{"S-001", []string{"R-001.C1"}}
+	pl, rv := details([]reply{fixed(research(r1)), fixed(outline(s))},
+		[]reply{fixed(review("approve", researchOK, nil)), fixed(review("approve", outlineOK, nil))}, s)
+	rv = append(rv, fixed(finalReview("approve", nil, s)))
+	f := newFixture(t, pl, rv)
+	if o := f.execute(t); o.Status != run.StatusApproved {
+		t.Fatalf("%+v\n%s", o, f.log.String())
+	}
+	for i, stage := range map[int]string{2: "detail", 3: "integration"} {
+		if !strings.Contains(f.reviewer.prompts[i], "  - R-001.C1 → S-001\n") {
+			t.Errorf("%s review prompt lacks the criterion map", stage)
+		}
+	}
+}

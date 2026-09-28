@@ -113,27 +113,45 @@ func (e *Engine) integrationGate(d *planData, rev *schema.Review) []string {
 	scope := schema.ScopeForRequirements(d.research.Requirements, true)
 	scope.KnownTargets = map[string]bool{}
 	scope.KnownVerifications = map[string]bool{}
-	provers := criterionProvers{} // criterion -> steps (and "final") whose verifications may prove it
 	for _, s := range d.steps {
 		scope.KnownTargets[s.ID] = true
 		for _, v := range s.Verification {
 			scope.KnownVerifications[s.ID+"/"+v.ID] = true
 		}
-		for _, c := range s.CriterionIDs {
-			provers.add(c, s.ID)
-		}
 	}
-	// "final" is evidence only where the plan has an end-to-end check, and only for its criteria.
-	for _, c := range d.outline.FinalVerificationCriterionIDs {
+	if len(d.outline.FinalVerificationCriterionIDs) > 0 {
 		scope.KnownTargets["final"], scope.KnownVerifications["final"] = true, true
-		provers.add(c, "final")
 	}
 	notes := []string(schema.CoverageGateStrict(rev, scope))
-	notes = append(notes, associations(rev, provers)...)
+	notes = append(notes, associations(rev, planProvers(d))...)
 	for i := range notes {
 		notes[i] = "coverage: " + notes[i]
 	}
 	return notes
+}
+
+// planProvers maps every criterion of the plan to the steps that carry it and, for a criterion of
+// the end-to-end check, to "final". The gate and the reviewer's prompt use the same map.
+func planProvers(d *planData) criterionProvers {
+	p := criterionProvers{}
+	for _, s := range d.steps {
+		for _, c := range s.CriterionIDs {
+			p.add(c, s.ID)
+		}
+	}
+	for _, c := range d.outline.FinalVerificationCriterionIDs {
+		p.add(c, "final") // evidence only where the plan has an end-to-end check, and only for its criteria
+	}
+	return p
+}
+
+// lines renders the map for a prompt: "R-001.C1 → S-001, S-002", sorted by criterion.
+func (p criterionProvers) lines() []string {
+	var out []string
+	for _, c := range slices.Sorted(maps.Keys(p)) {
+		out = append(out, c+" → "+strings.Join(slices.Sorted(maps.Keys(p[c])), ", "))
+	}
+	return out
 }
 
 // criterionProvers maps a criterion to what may prove it: the steps that carry it and "final" for a
@@ -160,18 +178,13 @@ func (p criterionProvers) carries(requirement, who string) bool {
 // associations checks that each coverage row cites evidence for every one of its criteria: each
 // criterion is proved by at least one cited verification of a step that carries it (or "final" for a
 // criterion of the end-to-end check). A requirement carried by several steps needs no citation from
-// every one of them, only per-criterion proof. Every target and verification cited must belong to
-// something that carries the row's criteria, and a verification must belong to one of the row's
-// targets.
+// every one of them, only per-criterion proof. Every cited verification must belong to something
+// that carries the row's criteria and to one of the row's targets. An extra target with no cited
+// verification adds nothing to the proof and does not block; it never makes a step a carrier.
 func associations(rev *schema.Review, provers criterionProvers) []string {
 	var notes []string
 	owner := func(ref string) string { s, _, _ := strings.Cut(ref, "/"); return s }
 	for _, c := range rev.Coverage {
-		for _, t := range c.TargetIDs {
-			if !provers.carries(c.RequirementID, t) {
-				notes = append(notes, fmt.Sprintf("%s cites %s, which carries none of its criteria", c.RequirementID, t))
-			}
-		}
 		for _, v := range c.VerificationRefs {
 			switch o := owner(v); {
 			case !provers.carries(c.RequirementID, o):

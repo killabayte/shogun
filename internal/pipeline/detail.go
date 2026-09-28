@@ -184,6 +184,20 @@ func (e *Engine) earliest(a, b string) string {
 	return a
 }
 
+// batchProvers maps the criteria of a detail batch to the batch steps that carry them. The gate and
+// the reviewer's prompt use the same map.
+func batchProvers(o *schema.Outline, batch []string) criterionProvers {
+	p := criterionProvers{}
+	for _, s := range o.Steps {
+		if contains(batch, s.ID) {
+			for _, c := range s.CriterionIDs {
+				p.add(c, s.ID)
+			}
+		}
+	}
+	return p
+}
+
 // detailGate: coverage of exactly the criteria the outline assigned to the batch, with step targets
 // and verification references of these steps; every step of the batch must be covered.
 func (e *Engine) detailGate(d *stageDoc, rev *schema.Review) []string {
@@ -209,16 +223,7 @@ func (e *Engine) detailGate(d *stageDoc, rev *schema.Review) []string {
 	}
 	notes := []string(schema.CoverageGateStrict(rev, scope))
 	// Associations (§5: "explicit results/coverage for each step").
-	provers := criterionProvers{} // criterion -> steps of this batch that carry it
-	for _, s := range o.Steps {
-		if !contains(e.batchIDs(), s.ID) {
-			continue
-		}
-		for _, c := range s.CriterionIDs {
-			provers.add(c, s.ID)
-		}
-	}
-	notes = append(notes, associations(rev, provers)...)
+	notes = append(notes, associations(rev, batchProvers(o, e.batchIDs()))...)
 	covered := map[string]bool{}
 	for _, c := range rev.Coverage {
 		for _, t := range c.TargetIDs {
@@ -460,6 +465,11 @@ func (e *Engine) detailPromptData(d *promptData, role string) error {
 		for _, r := range reqs {
 			d.Expected = append(d.Expected, r+" ("+strings.Join(crit[r], ", ")+")")
 		}
+		o, err := e.approvedOutline()
+		if err != nil {
+			return err
+		}
+		d.Provers = batchProvers(o, e.batchIDs()).lines()
 	}
 	return nil
 }
