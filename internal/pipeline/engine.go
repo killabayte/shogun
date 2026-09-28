@@ -484,11 +484,23 @@ func (e *Engine) sourceGate(stage string, rev *schema.Review) []string {
 	}
 	var notes []string
 	p := &e.State.Progress
+	settled, _ := loadDecisions(e.Run.Dir)
 	for _, a := range rev.SourceAssessments {
 		if explicit[a.SourceID] {
 			a.Role = "explicit"
 		}
 		if a.Role == "supporting" {
+			continue
+		}
+		if a.Verdict != "confirmed" && a.Role == "explicit" {
+			// The planner cannot make the reviewer confirm an explicit source, so a contradiction is
+			// the user's call: a blocking question (needs_input under --auto), asked once. The user's
+			// recorded answer is the basis that resolves it; an assumption never does.
+			q := e.sourceQuestion(a.SourceID)
+			if !answeredByUser(settled, q.Question) {
+				q.Why = fmt.Sprintf("The reviewer found %s %s: %s", a.SourceID, a.Verdict, a.Note)
+				addQuestions(p, stage, "shogun", []schema.Question{q}, settled)
+			}
 			continue
 		}
 		if a.Verdict != "confirmed" {
@@ -500,6 +512,38 @@ func (e *Engine) sourceGate(stage string, rev *schema.Review) []string {
 		}
 	}
 	return notes
+}
+
+// sourceQuestion is the stable question asked when the reviewer does not confirm an explicit source.
+// Its text names only the source, so a repeated verdict in a later round is the same question.
+func (e *Engine) sourceQuestion(id string) schema.Question {
+	origin := id
+	for _, s := range e.Manifest.Inputs {
+		if s.ID == id {
+			origin = s.Origin
+		}
+	}
+	for _, r := range e.Manifest.Repos {
+		if r.ID == id {
+			origin = r.Root
+		}
+	}
+	return schema.Question{
+		Question: fmt.Sprintf("The reviewer does not confirm the explicit source %s (%s). Where it differs from the task, should the plan follow the task and correct or drop that part of %s?", id, origin, id),
+		Impact:   "Unanswered, the plan cannot be approved: an explicit source is mandatory unless you say how to treat it.",
+		Options:  []string{"follow the task; correct or drop the contradicted part", "the source is right; revise the plan to follow it"},
+		Blocking: true,
+	}
+}
+
+// answeredByUser reports whether the user (not an assumption) answered the question.
+func answeredByUser(settled []Decision, question string) bool {
+	for _, d := range settled {
+		if d.Source != "assumption" && normQuestion(d.Question) == normQuestion(question) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Engine) webRecords() []inputs.Source {
