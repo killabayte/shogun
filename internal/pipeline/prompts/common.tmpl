@@ -18,7 +18,7 @@ Repositories:
 {{end}}{{end}}{{if .Decisions}}
 ## Decisions
 
-Answers from the user (source user or answers-file) are binding. Entries with source assumption are provisional defaults for details the task leaves open: follow them, but they are not user requirements — they never create a requirement, a criterion or a step of their own.
+Answers from the user (source user or answers-file) are binding. Entries with source assumption are provisional defaults for details the task leaves open: follow them, but they are not user requirements — they never create a requirement, a criterion or a step of their own, and where one contradicts the task, the task governs.
 {{range .Decisions}}- {{.ID}} ({{.Source}}): {{.Question}} → {{.Answer}}
 {{end}}{{end}}{{if .OpenFindings}}
 ## Open findings
@@ -34,13 +34,15 @@ Every open finding stays open until the reviewer resolves or rejects it; omittin
 {{define "minimal"}}
 ## Minimal plan rule
 
-The plan contains only the work needed for the agreed result while honouring the accepted constraints. Necessary preparation, verification and rollback are in scope. No side refactors, "while we are here" improvements, generalisation for the future, extra configurability or polish that the requirements do not ask for. Ideas beyond scope do not become steps or requirements; if something outside the task seems important, ask the user a question instead. An assumption you make to fill a gap stays the smallest reasonable choice and never adds a capability, a requirement or a step (for example, choosing where a value comes from must not add a way to override it). Minimal never means dropping an agreed requirement or constraint.
+The plan contains only the work needed for the agreed result while honouring the accepted constraints. Necessary preparation, verification and rollback are in scope. No side refactors, "while we are here" improvements, generalisation for the future, extra configurability or polish that the requirements do not ask for. Ideas beyond scope do not become steps or requirements; if something outside the task seems important, ask the user a question instead. An assumption may fill only what the task leaves open: it never weakens a requirement of the task or makes an exception to one, and it stays the smallest reasonable choice that adds no capability, requirement or step (for example, choosing where a value comes from must not add a way to override it). Minimal never means dropping an agreed requirement or constraint.
 {{end}}
 
 {{define "materiality"}}
 ## When a finding blocks
 
 A blocker or major finding names three things: the requirement, constraint or explicit input it violates (an R- or criterion id, the task text, or a cited source); the evidence (file:line, quoted task text or source); and the concrete consequence if the plan were executed as written. A finding that cannot name all three is minor at most. A missing requirement and work the task does not ask for stay material. Style, wording, structure and equally good alternatives are preferences: minor at most. An unknown that would change the plan is a question for the user, not a finding.
+
+Check every assumption (the Decisions entries with source assumption and the plan's own assumptions) against the ORIGINAL task. An assumption that weakens a requirement of the task or makes an exception to it is a major finding: ask for the plan to follow the task. Do not raise it as a question — the task already decides it.
 {{end}}
 
 {{define "provers"}}{{if .Provers}}
