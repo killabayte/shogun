@@ -109,6 +109,11 @@ shogun plan --task-file task.md \
   --input docs/rfc.md --input https://example.org/spec
 ```
 
+An `--input` is binding: the plan must agree with it. To have an earlier draft or an outdated spec corrected,
+give it as `--reference` instead: it is still studied, but where it differs from the task the task governs. If
+the reviewer does not confirm an `--input`, shogun asks whether it is reference material or binding; only one of
+the two offered answers settles it.
+
 On success shogun prints the path of the published plan and exits 0. Progress, the spend after each call and
 the reason for any stop go to stderr. While a model call runs, a line every 30 seconds shows that it is alive:
 

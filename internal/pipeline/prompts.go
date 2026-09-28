@@ -15,7 +15,7 @@ var prompts = template.Must(template.ParseFS(promptFiles, "prompts/*.tmpl"))
 
 type repoRef struct{ ID, Root, Head string }
 
-type srcRef struct{ ID, Origin, Path, SHA string }
+type srcRef struct{ ID, Origin, Path, SHA, Role string }
 
 // promptData is everything a built-in prompt may show. Large material is passed by path.
 type promptData struct {
