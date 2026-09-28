@@ -49,7 +49,13 @@ type Source struct {
 	FetchedAt   string `json:"fetched_at,omitempty"`
 	Status      string `json:"status"` // ok | error
 	Error       string `json:"error,omitempty"`
+	// Role is empty for an authoritative input (--input) and "reference" for material the task asks to
+	// correct (--reference): it must still be studied, but the task governs where they differ.
+	Role string `json:"role,omitempty"`
 }
+
+// RoleReference marks an explicit input given with --reference.
+const RoleReference = "reference"
 
 // ErrUnavailable wraps every input failure; callers map it to needs_input.
 var ErrUnavailable = errors.New("input unavailable")
@@ -251,6 +257,9 @@ func (m *Manifest) ComputeFingerprint() string {
 	}
 	for _, s := range m.Inputs {
 		fmt.Fprintf(h, "input\x00%s\x00%s\x00%s\n", s.ID, s.Status, s.SHA256)
+		if s.Role != "" { // older manifests have no role; their fingerprints stay the same
+			fmt.Fprintf(h, "role\x00%s\x00%s\n", s.ID, s.Role)
+		}
 	}
 	m.Fingerprint = hex.EncodeToString(h.Sum(nil))
 	return m.Fingerprint

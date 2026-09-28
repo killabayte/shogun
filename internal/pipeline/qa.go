@@ -113,9 +113,41 @@ func record(ds []Decision, pending []run.Pending, answers map[string]string, sou
 			}
 			a, src = q.ProposedAssumption, "assumption"
 		}
+		if q.Closed {
+			// Checked on receipt, before any model call, and stored as the option's full text so both
+			// models see what was chosen, not a bare number.
+			choice := closedChoice(q.Options, a)
+			if choice == "" {
+				return ds, fmt.Errorf("question %s takes one of its options, by number or exact text (got %q): %s", q.ID, a, optionList(q.Options))
+			}
+			a = choice
+		}
 		ds = append(ds, Decision{ID: q.ID, Stage: q.Stage, Origin: q.Origin, Question: q.Question, Answer: a, Source: src, At: ts})
 	}
 	return ds, nil
+}
+
+// closedChoice maps an answer to the option it selects: its number or its exact text (case and
+// spacing ignored). Anything else selects nothing.
+func closedChoice(options []string, answer string) string {
+	a := normQuestion(answer)
+	for i, o := range options {
+		if a == fmt.Sprint(i+1) || a == normQuestion(o) {
+			return o
+		}
+	}
+	return ""
+}
+
+func optionList(options []string) string {
+	var b strings.Builder
+	for i, o := range options {
+		if i > 0 {
+			b.WriteString("; ")
+		}
+		fmt.Fprintf(&b, "%d) %s", i+1, o)
+	}
+	return b.String()
 }
 
 // resolveQuestions settles the pending questions: interactively (at most two rounds), or in

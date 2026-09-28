@@ -1,0 +1,94 @@
+{
+ "coverage": [
+  {
+   "criterion_ids": [
+    "R-001.C1"
+   ],
+   "requirement_id": "R-001",
+   "status": "covered",
+   "target_ids": [
+    "S-002"
+   ],
+   "verification_refs": [
+    "S-002/V-002"
+   ]
+  },
+  {
+   "criterion_ids": [
+    "R-002.C1",
+    "R-002.C2",
+    "R-002.C3"
+   ],
+   "requirement_id": "R-002",
+   "status": "covered",
+   "target_ids": [
+    "S-002"
+   ],
+   "verification_refs": [
+    "S-002/V-002"
+   ]
+  },
+  {
+   "criterion_ids": [
+    "R-003.C1",
+    "R-003.C2"
+   ],
+   "requirement_id": "R-003",
+   "status": "covered",
+   "target_ids": [
+    "S-002"
+   ],
+   "verification_refs": [
+    "S-002/V-002"
+   ]
+  },
+  {
+   "criterion_ids": [
+    "R-004.C1",
+    "R-004.C2"
+   ],
+   "requirement_id": "R-004",
+   "status": "covered",
+   "target_ids": [
+    "S-001",
+    "S-002",
+    "final"
+   ],
+   "verification_refs": [
+    "S-001/V-001",
+    "S-002/V-002",
+    "S-002/V-003",
+    "final"
+   ]
+  },
+  {
+   "criterion_ids": [
+    "R-005.C1"
+   ],
+   "requirement_id": "R-005",
+   "status": "covered",
+   "target_ids": [
+    "S-002",
+    "final"
+   ],
+   "verification_refs": [
+    "S-002/V-002",
+    "final"
+   ]
+  }
+ ],
+ "dispositions": [],
+ "findings": [],
+ "questions": [],
+ "schema_version": 1,
+ "source_assessments": [
+  {
+   "note": "R-002.C2 and S-001 action 4 omit unavailable fields from damaged runs, contrary to the original task's correction. The candidate correctly replaces this shape with all 15 keys and explicitly tests key presence and null values.",
+   "role": "explicit",
+   "source_id": "in-1",
+   "verdict": "contradicted"
+  }
+ ],
+ "summary": "Approve. The plan corrects the damaged-run shape, preserves the existing aggregation rules and text path, and provides verification for every required criterion. Cited code and fixture values match the repository. No files were changed or planned commands executed.",
+ "verdict": "approve"
+}

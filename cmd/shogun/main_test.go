@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/killabayte/shogun/internal/library"
+	"github.com/killabayte/shogun/internal/run"
 )
 
 func runCLI(t *testing.T, ws string, args ...string) (int, string, string) {
@@ -226,5 +228,16 @@ func TestVersionFrom(t *testing.T) {
 		if got := versionFrom(c.set, c.module); got != c.want {
 			t.Errorf("versionFrom(%q, %q) = %q, want %q", c.set, c.module, got, c.want)
 		}
+	}
+}
+
+// A closed question is asked again in the terminal until an option is chosen (at most three tries).
+func TestTerminalAskerReasksClosedQuestion(t *testing.T) {
+	var out strings.Builder
+	a := &terminalAsker{in: bufio.NewReader(strings.NewReader("reference\n2\n")), out: &out}
+	got, err := a.Ask(context.Background(), []run.Pending{{ID: "Q-001", Stage: "plan", Origin: "shogun", Question: "What is in-1 for?",
+		Options: []string{"reference: x", "authoritative: y"}, Blocking: true, Closed: true}})
+	if err != nil || got["Q-001"] != "authoritative: y" || !strings.Contains(out.String(), "answer with one of the numbers 1-2") {
+		t.Fatalf("%v %q\n%s", err, got, out.String())
 	}
 }

@@ -1,0 +1,105 @@
+{
+ "coverage": [
+  {
+   "criterion_ids": [
+    "R-001.C1"
+   ],
+   "requirement_id": "R-001",
+   "status": "covered",
+   "target_ids": [
+    "S-002"
+   ],
+   "verification_refs": [
+    "S-002/V-002"
+   ]
+  },
+  {
+   "criterion_ids": [
+    "R-002.C1",
+    "R-002.C2",
+    "R-002.C3"
+   ],
+   "requirement_id": "R-002",
+   "status": "covered",
+   "target_ids": [
+    "S-002"
+   ],
+   "verification_refs": [
+    "S-002/V-002"
+   ]
+  },
+  {
+   "criterion_ids": [
+    "R-003.C1",
+    "R-003.C2"
+   ],
+   "requirement_id": "R-003",
+   "status": "covered",
+   "target_ids": [
+    "S-002"
+   ],
+   "verification_refs": [
+    "S-002/V-002"
+   ]
+  },
+  {
+   "criterion_ids": [
+    "R-004.C1",
+    "R-004.C2"
+   ],
+   "requirement_id": "R-004",
+   "status": "covered",
+   "target_ids": [
+    "S-001",
+    "S-002",
+    "final"
+   ],
+   "verification_refs": [
+    "S-001/V-001",
+    "S-002/V-002",
+    "S-002/V-003",
+    "final"
+   ]
+  },
+  {
+   "criterion_ids": [
+    "R-005.C1"
+   ],
+   "requirement_id": "R-005",
+   "status": "covered",
+   "target_ids": [
+    "S-002",
+    "final"
+   ],
+   "verification_refs": [
+    "S-002/V-002",
+    "final"
+   ]
+  }
+ ],
+ "dispositions": [
+  {
+   "evidence": [
+    "candidate.md, FACT-015 explicitly identifies and supersedes the conflicting shape in in-1.",
+    "candidate.md, S-001 actions 4–5 specify all 15 keys without omitempty and null unavailable values.",
+    "candidate.md:179–180 require both key presence and null values for damaged runs."
+   ],
+   "finding_id": "F-001",
+   "reason": "The reported source contradiction is explicitly reconciled with the original task, and the implementation and verification consistently use the corrected shape.",
+   "status": "resolved"
+  }
+ ],
+ "findings": [],
+ "questions": [],
+ "schema_version": 1,
+ "source_assessments": [
+  {
+   "note": "R-002.C2 and S-001 action 4 omit unavailable fields from damaged runs, contrary to the original task. The candidate explicitly rejects this portion while retaining the applicable design and verification.",
+   "role": "explicit",
+   "source_id": "in-1",
+   "verdict": "contradicted"
+  }
+ ],
+ "summary": "Approve. The plan covers every mandatory criterion, corrects damaged-run null fields with explicit presence checks, and preserves text output and read-only behavior. Cited repository facts were checked; no planned commands were executed.",
+ "verdict": "approve"
+}

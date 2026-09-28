@@ -10,7 +10,7 @@ Read files yourself; everything below is on disk and read-only. Do not modify an
 Repositories:
 {{range .Repos}}- {{.ID}}: {{.Root}}{{if .Head}} (HEAD {{.Head}}){{end}}
 {{end}}{{if .Inputs}}Explicit inputs (snapshots; every one is mandatory to study):
-{{range .Inputs}}- {{.ID}}: {{.Path}} (origin {{.Origin}}, sha256 {{.SHA}})
+{{range .Inputs}}- {{.ID}}: {{.Path}} (origin {{.Origin}}, sha256 {{.SHA}}){{if eq .Role "reference"}} — reference: material to correct; where it differs from the task, the task governs{{end}}
 {{end}}{{end}}{{if .Web}}Web sources archived by Shogun after research (read the archived bytes, not the live page):
 {{range .Web}}- {{.ID}}: {{.Path}} (origin {{.Origin}}, sha256 {{.SHA}})
 {{end}}{{end}}{{if .WebFailed}}Web sources Shogun could NOT archive (not evidence; assess whether any is essential):

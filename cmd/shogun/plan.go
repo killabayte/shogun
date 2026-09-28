@@ -20,10 +20,11 @@ import (
 // writes task/config/manifest/state) and then runs the planning stages.
 func (a *app) cmdPlan(args []string) int {
 	fs := a.newFlagSet("plan")
-	var repos, ins multiFlag
+	var repos, ins, refs multiFlag
 	taskFile := fs.String("task-file", "", "read the task text from this file")
 	fs.Var(&repos, "repo", "repository root to study (repeatable; default: current directory)")
 	fs.Var(&ins, "input", "file path or http(s) URL that must be studied (repeatable)")
+	fs.Var(&refs, "reference", "file path or http(s) URL to study as material to correct: the task governs where they differ (repeatable)")
 	planner := fs.String("planner", "", "override planner model spec (claude/<model>:<effort>)")
 	reviewer := fs.String("reviewer", "", "override reviewer model spec (codex/<model>:<effort>)")
 	out := fs.String("out", "", "path of the primary plan file (default: plans_dir/<project>/<run-id>.md or docs/plans/<run-id>.md)")
@@ -130,7 +131,10 @@ func (a *app) cmdPlan(args []string) int {
 		man.Repos = append(man.Repos, rp)
 		fmt.Fprintf(a.stderr, "[intake] %s %s git=%v head=%.12s\n", rp.ID, rp.Root, rp.IsGit, rp.Head)
 	}
-	srcs, inErr := inputs.NewMaterializer().Materialize(ictx, r.Dir, a.cwd, ins)
+	srcs, inErr := inputs.NewMaterializer().Materialize(ictx, r.Dir, a.cwd, append(append([]string{}, ins...), refs...))
+	for i := len(ins); i < len(srcs); i++ {
+		srcs[i].Role = inputs.RoleReference
+	}
 	if ictx.Err() != nil {
 		return overrun()
 	}

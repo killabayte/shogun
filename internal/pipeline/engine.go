@@ -484,11 +484,30 @@ func (e *Engine) sourceGate(stage string, rev *schema.Review) []string {
 	}
 	var notes []string
 	p := &e.State.Progress
+	settled, _ := loadDecisions(e.Run.Dir)
 	for _, a := range rev.SourceAssessments {
 		if explicit[a.SourceID] {
 			a.Role = "explicit"
 		}
 		if a.Role == "supporting" {
+			continue
+		}
+		if a.Verdict != "confirmed" && a.Role == "explicit" {
+			// The planner cannot make the reviewer confirm an explicit source, so what the source is
+			// for is the user's call, recorded as one of two exact options for this very snapshot:
+			// reference material (the task governs; the reviewer's verdict on it does not block) or
+			// authoritative (the plan must follow it; the verdict stays a problem for the planner).
+			// Without such a choice (no answer, an assumption, any other text) the user is asked.
+			switch e.sourceRole(a.SourceID, settled) {
+			case inputs.RoleReference:
+				continue
+			case roleAuthoritative:
+				notes = append(notes, fmt.Sprintf("source %s is authoritative by the user's decision, but the reviewer finds it %s: %s", a.SourceID, a.Verdict, a.Note))
+				continue
+			}
+			q := e.sourceQuestion(a.SourceID)
+			q.Why = fmt.Sprintf("The reviewer found %s %s: %s", a.SourceID, a.Verdict, a.Note)
+			askAgain(p, stage, q)
 			continue
 		}
 		if a.Verdict != "confirmed" {
@@ -500,6 +519,77 @@ func (e *Engine) sourceGate(stage string, rev *schema.Review) []string {
 		}
 	}
 	return notes
+}
+
+// roleAuthoritative is the user's choice to keep an explicit source binding.
+const roleAuthoritative = "authoritative"
+
+// sourceQuestion asks what an explicit source is for. The text names the source and its snapshot
+// digest, so a repeated verdict on the same bytes is the same question, and changed bytes (a refresh)
+// are asked about again.
+func (e *Engine) sourceQuestion(id string) schema.Question {
+	origin, digest := id, ""
+	for _, s := range e.Manifest.Inputs {
+		if s.ID == id {
+			origin, digest = s.Origin, s.SHA256
+		}
+	}
+	for _, r := range e.Manifest.Repos {
+		if r.ID == id {
+			origin, digest = r.Root, r.Fingerprint
+		}
+	}
+	return schema.Question{
+		Question: fmt.Sprintf("The reviewer does not confirm the explicit source %s (%s, snapshot %s). What is %s for in this plan?", id, origin, short(digest), id),
+		Impact:   "Unanswered, the plan cannot be approved. Answer with one option exactly (or its number); any other answer is asked again.",
+		Options: []string{
+			fmt.Sprintf("reference: %s is material to correct; where it differs from the task, the task governs", id),
+			fmt.Sprintf("authoritative: %s is binding; revise the plan to follow it", id),
+		},
+		Blocking: true,
+	}
+}
+
+// sourceRole is what the user made an explicit source: "reference" (by --reference, or by choosing
+// that option for this snapshot), "authoritative" (by choosing that option), or "" (no valid choice).
+// Only the latest user answer counts, only if it is one of the offered options; an assumption never
+// does.
+func (e *Engine) sourceRole(id string, settled []Decision) string {
+	for _, s := range e.Manifest.Inputs {
+		if s.ID == id && s.Role == inputs.RoleReference {
+			return inputs.RoleReference
+		}
+	}
+	q := e.sourceQuestion(id)
+	role := ""
+	for _, d := range settled {
+		if d.Source == "assumption" || normQuestion(d.Question) != normQuestion(q.Question) {
+			continue
+		}
+		switch a := normQuestion(d.Answer); a {
+		case "1", normQuestion(q.Options[0]):
+			role = inputs.RoleReference
+		case "2", normQuestion(q.Options[1]):
+			role = roleAuthoritative
+		default:
+			role = "" // a later unrecognised answer withdraws an earlier choice
+		}
+	}
+	return role
+}
+
+// askAgain puts a blocking question up unless it is already pending. Unlike addQuestions it asks
+// even when the question was answered before: an answer that is not one of the options resolves
+// nothing.
+func askAgain(p *run.Progress, stage string, q schema.Question) {
+	for _, pq := range p.Pending {
+		if normQuestion(pq.Question) == normQuestion(q.Question) {
+			return
+		}
+	}
+	p.NextQuestion++
+	p.Pending = append(p.Pending, run.Pending{ID: fmt.Sprintf("Q-%03d", p.NextQuestion), Stage: stage, Origin: "shogun",
+		Question: q.Question, Why: q.Why, Impact: q.Impact, Options: q.Options, Blocking: true, Closed: true})
 }
 
 func (e *Engine) webRecords() []inputs.Source {
@@ -893,8 +983,13 @@ func (e *Engine) prompt(stage, role string, rev int) (string, error) {
 	for _, r := range e.Manifest.Repos {
 		d.Repos = append(d.Repos, repoRef{ID: r.ID, Root: r.Root, Head: r.Head})
 	}
+	decisions, _ := loadDecisions(e.Run.Dir)
 	for _, s := range e.sources() {
-		d.Inputs = append(d.Inputs, srcRef{ID: s.ID, Origin: s.Origin, Path: filepath.Join(e.Run.Dir, s.StoredPath), SHA: s.SHA256})
+		srcRole := s.Role
+		if e.sourceRole(s.ID, decisions) == inputs.RoleReference {
+			srcRole = inputs.RoleReference // the user's choice for this snapshot, shown to both models
+		}
+		d.Inputs = append(d.Inputs, srcRef{ID: s.ID, Origin: s.Origin, Path: filepath.Join(e.Run.Dir, s.StoredPath), SHA: s.SHA256, Role: srcRole})
 	}
 	for _, s := range e.webRecords() {
 		if s.Status == "ok" {
