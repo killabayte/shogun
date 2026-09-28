@@ -209,20 +209,16 @@ func (e *Engine) detailGate(d *stageDoc, rev *schema.Review) []string {
 	}
 	notes := []string(schema.CoverageGateStrict(rev, scope))
 	// Associations (§5: "explicit results/coverage for each step").
-	carries := map[string]map[string]bool{} // requirement -> steps of this batch that carry its criteria
+	provers := criterionProvers{} // criterion -> steps of this batch that carry it
 	for _, s := range o.Steps {
 		if !contains(e.batchIDs(), s.ID) {
 			continue
 		}
 		for _, c := range s.CriterionIDs {
-			r, _, _ := strings.Cut(c, ".")
-			if carries[r] == nil {
-				carries[r] = map[string]bool{}
-			}
-			carries[r][s.ID] = true
+			provers.add(c, s.ID)
 		}
 	}
-	notes = append(notes, associations(rev, carries, carries)...)
+	notes = append(notes, associations(rev, provers)...)
 	covered := map[string]bool{}
 	for _, c := range rev.Coverage {
 		for _, t := range c.TargetIDs {

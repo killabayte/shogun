@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/killabayte/shogun/internal/inputs"
@@ -111,80 +113,80 @@ func (e *Engine) integrationGate(d *planData, rev *schema.Review) []string {
 	scope := schema.ScopeForRequirements(d.research.Requirements, true)
 	scope.KnownTargets = map[string]bool{}
 	scope.KnownVerifications = map[string]bool{}
-	carries := map[string]map[string]bool{} // requirement -> steps (and "final") that carry its criteria
-	carry := func(c, who string) {
-		r, _, _ := strings.Cut(c, ".")
-		if carries[r] == nil {
-			carries[r] = map[string]bool{}
-		}
-		carries[r][who] = true
-	}
-	inStep := map[string]bool{}
+	provers := criterionProvers{} // criterion -> steps (and "final") whose verifications may prove it
 	for _, s := range d.steps {
 		scope.KnownTargets[s.ID] = true
 		for _, v := range s.Verification {
 			scope.KnownVerifications[s.ID+"/"+v.ID] = true
 		}
 		for _, c := range s.CriterionIDs {
-			carry(c, s.ID)
-			inStep[c] = true
+			provers.add(c, s.ID)
 		}
 	}
 	// "final" is evidence only where the plan has an end-to-end check, and only for its criteria.
-	// It must be cited only for a criterion no step carries; for the others it may be cited.
-	allowed := map[string]map[string]bool{}
-	for r, who := range carries {
-		allowed[r] = map[string]bool{}
-		for w := range who {
-			allowed[r][w] = true
-		}
-	}
 	for _, c := range d.outline.FinalVerificationCriterionIDs {
 		scope.KnownTargets["final"], scope.KnownVerifications["final"] = true, true
-		r, _, _ := strings.Cut(c, ".")
-		if allowed[r] == nil {
-			allowed[r] = map[string]bool{}
-		}
-		allowed[r]["final"] = true
-		if !inStep[c] {
-			carry(c, "final")
-		}
+		provers.add(c, "final")
 	}
 	notes := []string(schema.CoverageGateStrict(rev, scope))
-	notes = append(notes, associations(rev, carries, allowed)...)
+	notes = append(notes, associations(rev, provers)...)
 	for i := range notes {
 		notes[i] = "coverage: " + notes[i]
 	}
 	return notes
 }
 
-// associations checks that each coverage row cites exactly the evidence its criteria are assigned
-// to: every carrier (a step, or "final" for the end-to-end check) of a requirement is a target with a
-// verification of its own ("S-NNN/V-NNN", or "final"), and nothing else is cited.
-func associations(rev *schema.Review, carries, allowed map[string]map[string]bool) []string {
+// criterionProvers maps a criterion to what may prove it: the steps that carry it and "final" for a
+// criterion of the end-to-end check.
+type criterionProvers map[string]map[string]bool
+
+func (p criterionProvers) add(criterion, who string) {
+	if p[criterion] == nil {
+		p[criterion] = map[string]bool{}
+	}
+	p[criterion][who] = true
+}
+
+// carries reports whether who proves any criterion of the requirement.
+func (p criterionProvers) carries(requirement, who string) bool {
+	for c, ws := range p {
+		if r, _, _ := strings.Cut(c, "."); r == requirement && ws[who] {
+			return true
+		}
+	}
+	return false
+}
+
+// associations checks that each coverage row cites evidence for every one of its criteria: each
+// criterion is proved by at least one cited verification of a step that carries it (or "final" for a
+// criterion of the end-to-end check). A requirement carried by several steps needs no citation from
+// every one of them, only per-criterion proof. Every target and verification cited must belong to
+// something that carries the row's criteria, and a verification must belong to one of the row's
+// targets.
+func associations(rev *schema.Review, provers criterionProvers) []string {
 	var notes []string
 	owner := func(ref string) string { s, _, _ := strings.Cut(ref, "/"); return s }
 	for _, c := range rev.Coverage {
 		for _, t := range c.TargetIDs {
-			if !allowed[c.RequirementID][t] {
+			if !provers.carries(c.RequirementID, t) {
 				notes = append(notes, fmt.Sprintf("%s cites %s, which carries none of its criteria", c.RequirementID, t))
 			}
 		}
 		for _, v := range c.VerificationRefs {
-			if !allowed[c.RequirementID][owner(v)] {
+			switch o := owner(v); {
+			case !provers.carries(c.RequirementID, o):
 				notes = append(notes, fmt.Sprintf("%s cites verification %s of something that carries none of its criteria", c.RequirementID, v))
+			case !contains(c.TargetIDs, o):
+				notes = append(notes, fmt.Sprintf("%s cites verification %s, but %s is not a target of the row", c.RequirementID, v, o))
 			}
 		}
-		for who := range carries[c.RequirementID] {
-			if !contains(c.TargetIDs, who) {
-				notes = append(notes, fmt.Sprintf("%s: %s carries its criteria but is not a target of the row", c.RequirementID, who))
-			}
+		for _, crit := range c.CriterionIDs {
 			proved := false
 			for _, v := range c.VerificationRefs {
-				proved = proved || owner(v) == who
+				proved = proved || provers[crit][owner(v)]
 			}
 			if !proved {
-				notes = append(notes, fmt.Sprintf("%s: %s has no verification cited for its criteria", c.RequirementID, who))
+				notes = append(notes, fmt.Sprintf("%s: no cited verification proves %s (it can be proved by %s)", c.RequirementID, crit, strings.Join(slices.Sorted(maps.Keys(provers[crit])), ", ")))
 			}
 		}
 	}
