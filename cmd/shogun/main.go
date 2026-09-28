@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"regexp"
 	"runtime/debug"
 	"strings"
 	"syscall"
@@ -29,22 +28,33 @@ const (
 	ExitInterrupted = 130
 )
 
-// version is set at build time from an exact release tag (make build on v0.1.0 → "0.1.0"); a build
-// of a tagged module (go install …@v0.1.0) takes it from the module version instead.
-var version = "0.1.0-dev"
+// version is set at build time from an exact release tag (make build on v0.1.0 → "0.1.0"). Without
+// it the module version Go records is used: the tag for go install …@v0.1.0, a pseudo-version after
+// the last tag for any other build in the repository (0.2.1-0.20260928074837-d85b371d6d65).
+var version = ""
 
 // revision is set at build time (make build: branch-hash-timestamp); "latest" for plain go build.
 var revision = "latest"
 
-// reRelease matches a tag's module version (v0.1.0, v0.2.0-rc.1), not a pseudo-version or +dirty.
-var reRelease = regexp.MustCompile(`^v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$`)
-
-// releaseVersion is the build-time version, or the module version of a go install from a tag.
+// releaseVersion is the version shown by `version` and `--help`.
 func releaseVersion() string {
-	if bi, ok := debug.ReadBuildInfo(); ok && version == "0.1.0-dev" && reRelease.MatchString(bi.Main.Version) {
-		return strings.TrimPrefix(bi.Main.Version, "v")
+	module := ""
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		module = bi.Main.Version
 	}
-	return version
+	return versionFrom(version, module)
+}
+
+// versionFrom prefers the build-time version, then the module version; "dev" when neither is known
+// (a build outside version control).
+func versionFrom(set, module string) string {
+	switch {
+	case set != "":
+		return set
+	case module != "" && module != "(devel)":
+		return strings.TrimPrefix(module, "v")
+	}
+	return "dev"
 }
 
 // getwd is a hook for tests.
