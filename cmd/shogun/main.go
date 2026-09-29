@@ -94,7 +94,7 @@ Usage:
   shogun resume <run-id|dir> [flags]  continue a run (answers, refresh, budgets)
   shogun status <run-id|dir> [--json] show run state
   shogun list [--status s] [--project p] [--dir d]   list plans in the library
-  shogun stats [--dir d]              time, attempts and tokens of every run in .shogun/runs
+  shogun stats [--dir d] [--json]     time, attempts and tokens of every run in .shogun/runs
   shogun verify <plan.md>             integrity of the approved area vs its receipt
   shogun doctor [--live] [--planner s] [--reviewer s]   check binaries, versions, config; --live certifies a model pair
   shogun config                       print the effective configuration with provenance
