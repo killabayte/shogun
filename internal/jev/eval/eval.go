@@ -204,16 +204,25 @@ func readCase(dir string) (string, *Plan, []Decision, error) {
 func Items(task string, plan *Plan, decisions []Decision) []Item {
 	var items []Item
 	n := 0
-	seen := map[string]bool{}
+	// The latest decision on a question is the one in force: an assumption only while no binding
+	// answer (user or answers-file) has replaced it.
+	latest := map[string]Decision{}
+	var order []string
 	for _, d := range decisions {
-		if d.Source == "assumption" {
+		k := norm(d.Question)
+		if _, ok := latest[k]; !ok {
+			order = append(order, k)
+		}
+		latest[k] = d
+	}
+	for _, k := range order {
+		if d := latest[k]; d.Source == "assumption" {
 			n++
-			seen[norm(d.Question)] = true
 			items = append(items, assumptionItem(task, decisions, fmt.Sprintf("A-%03d", n), d.Question, d.Answer))
 		}
 	}
-	for _, q := range plan.Questions { // a planner question not yet decided: its proposed assumption
-		if !seen[norm(q.Question)] && q.ProposedAssumption != "" {
+	for _, q := range plan.Questions { // a planner question with no decision at all: its proposal
+		if _, decided := latest[norm(q.Question)]; !decided && q.ProposedAssumption != "" {
 			n++
 			items = append(items, assumptionItem(task, decisions, fmt.Sprintf("A-%03d", n), q.Question, q.ProposedAssumption))
 		}
@@ -317,7 +326,7 @@ func stepItem(task string, plan *Plan, decisions []Decision, s Step) Item {
 				"unknown":                     "cannot tell from the state"}),
 			"adds_capability":    jev.Noul("Do `step.actions` add a capability, option or generality that neither `task` nor `criteria` ask for?"),
 			"oversized":          jev.Noul("Do `step.actions` do more than `step.objective` and `criteria` need?"),
-			"verification_bites": jev.Noul("Would `step.verification` detect a violation of one of `criteria` if the step's result broke it? A verification that passes on an unchanged tree, such as an existing test suite the step does not extend, does not."),
+			"verification_bites": jev.Noul("Would `step.verification`, as written, detect a violation of every one of `criteria` if the step's result broke that criterion? Existing tests count when they assert the criterion. Answer no if at least one listed criterion could be violated without any listed verification failing."),
 			"contradicts_task":   jev.Noul("Does any of `step.actions` do the opposite of something `task` explicitly requires?"),
 		},
 		Adverse: []Adverse{{"role", "optional_improvement", SignalThreshold}, {"role", "out_of_scope", SignalThreshold},

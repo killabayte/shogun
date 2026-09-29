@@ -54,7 +54,8 @@ type CaseResult struct {
 	Err         string       `json:"error,omitempty"`
 }
 
-// Report is one evaluation run.
+// Report is one evaluation run. Every input to Decision is in the JSON, so a saved report
+// decides the same way when read back.
 type Report struct {
 	Model       string        `json:"model"`
 	Cases       []CaseResult  `json:"cases"`
@@ -63,12 +64,24 @@ type Report struct {
 	InputTokens int64         `json:"input_tokens"`
 	CostUSD     float64       `json:"cost_usd"` // list price, $0.042 per million input tokens
 	Elapsed     time.Duration `json:"elapsed"`
-	Errors      int           `json:"errors"`
-	// Decision inputs (§7): defects caught of the defective cases; false alarms per good case.
-	DefectsCaught, Defects int            `json:"-"`
-	GoodFalseAlarms        map[string]int `json:"good_false_alarms"`
-	StoppedBy              string         `json:"stopped_by,omitempty"`
+	Errors      int           `json:"errors"`      // failed requests
+	CaseErrors  int           `json:"case_errors"` // cases that could not be loaded
+	// Decision inputs (§7): defective cases judged and caught; good cases judged and their false
+	// alarms at the signal threshold.
+	Defects         int            `json:"defects"`
+	DefectsCaught   int            `json:"defects_caught"`
+	Good            int            `json:"good"`
+	GoodFalseAlarms map[string]int `json:"good_false_alarms"`
+	StoppedBy       string         `json:"stopped_by,omitempty"`
 }
+
+// The §7 set and rule. A run that judged fewer cases than the set, or lost any request, cannot pass.
+const (
+	RequiredDefects = 7
+	RequiredGood    = 2
+	MinCaught       = 5
+	MaxFalseAlarms  = 1
+)
 
 const listPricePerMillion = 0.042
 
@@ -77,12 +90,17 @@ const listPricePerMillion = 0.042
 func Run(ctx context.Context, c *jev.Client, cases []Case, caps Caps) *Report {
 	rep := &Report{GoodFalseAlarms: map[string]int{}}
 	start := time.Now()
+	// The time cap is a deadline on every request, not only a check between requests: a request in
+	// flight when the cap arrives is cut and counted as skipped.
+	runCtx, cancel := context.WithDeadline(ctx, start.Add(caps.MaxElapsed))
+	defer cancel()
 	stopped := false
 	for _, cs := range cases {
 		cr := CaseResult{Name: cs.Name, Label: cs.Label}
 		_, items, err := Load(cs)
 		if err != nil {
 			cr.Err = err.Error()
+			rep.CaseErrors++
 			rep.Cases = append(rep.Cases, cr)
 			continue
 		}
@@ -103,10 +121,16 @@ func Run(ctx context.Context, c *jev.Client, cases []Case, caps Caps) *Report {
 				continue
 			}
 			rep.Requests++
-			res, err := c.Ask(ctx, it.State, it.Questions)
+			res, err := c.Ask(runCtx, it.State, it.Questions)
 			if err != nil {
-				ir.Err = err.Error()
-				rep.Errors++
+				if runCtx.Err() != nil { // the cap cut this request
+					stopped, rep.StoppedBy = true, fmt.Sprintf("time cap %s", caps.MaxElapsed)
+					ir.Skipped = true
+					rep.Skipped++
+				} else {
+					ir.Err = err.Error()
+					rep.Errors++
+				}
 				cr.Items = append(cr.Items, ir)
 				continue
 			}
@@ -129,6 +153,7 @@ func Run(ctx context.Context, c *jev.Client, cases []Case, caps Caps) *Report {
 				rep.DefectsCaught++
 			}
 		} else {
+			rep.Good++
 			rep.GoodFalseAlarms[cs.Name] = len(cr.FalseAlarms)
 		}
 		rep.Cases = append(rep.Cases, cr)
@@ -191,8 +216,9 @@ func judge(cr *CaseResult, cs Case) {
 	}
 }
 
-// Decision applies the §7 rule: at least 5 of 7 defects caught and at most 1 false alarm per good
-// case at the signal threshold.
+// Decision applies the §7 rule to a complete run only: all 7 defective and both good cases judged,
+// no case or request lost; then at least 5 defects caught and at most 1 false alarm per good case
+// at the signal threshold.
 func (r *Report) Decision() (ok bool, why string) {
 	worst := 0
 	for _, n := range r.GoodFalseAlarms {
@@ -200,8 +226,13 @@ func (r *Report) Decision() (ok bool, why string) {
 			worst = n
 		}
 	}
-	ok = r.DefectsCaught >= 5 && worst <= 1 && r.Skipped == 0 && r.Errors == 0
-	why = fmt.Sprintf("%d of %d defects caught; worst good case %d false alarm(s); %d error(s); %d skipped", r.DefectsCaught, r.Defects, worst, r.Errors, r.Skipped)
+	complete := r.CaseErrors == 0 && r.Errors == 0 && r.Skipped == 0 && r.Defects == RequiredDefects && r.Good == RequiredGood
+	ok = complete && r.DefectsCaught >= MinCaught && worst <= MaxFalseAlarms
+	why = fmt.Sprintf("%d of %d defects caught (%d required); %d good case(s) (%d required), worst %d false alarm(s); %d case error(s); %d request error(s); %d skipped",
+		r.DefectsCaught, r.Defects, RequiredDefects, r.Good, RequiredGood, worst, r.CaseErrors, r.Errors, r.Skipped)
+	if !complete {
+		why = "incomplete run: " + why
+	}
 	return ok, why
 }
 

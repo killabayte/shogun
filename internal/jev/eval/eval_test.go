@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -105,11 +106,11 @@ func TestItemsCarryTheirEvidence(t *testing.T) {
 
 // fake answers every question with canned probabilities: adverse everywhere for the named items,
 // benign elsewhere.
-func fake(t *testing.T, adverseItems map[string]bool, delay time.Duration) (*jev.Client, *int) {
+func fake(t *testing.T, adverseItems map[string]bool, delay time.Duration) (*jev.Client, *atomic.Int64) {
 	t.Helper()
-	calls := 0
+	calls := &atomic.Int64{} // a handler cut by the time cap may still run after Run returns
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
+		calls.Add(1)
 		time.Sleep(delay)
 		var req struct {
 			State     map[string]any          `json:"state"`
@@ -162,7 +163,7 @@ func fake(t *testing.T, adverseItems map[string]bool, delay time.Duration) (*jev
 		json.NewEncoder(w).Encode(map[string]any{"model": "jev-1.13.0", "answers": answers, "usage": map[string]int{"input_tokens": 1000, "output_tokens": 10}})
 	}))
 	t.Cleanup(srv.Close)
-	return &jev.Client{BaseURL: srv.URL, Key: "apik-test", Timeout: 5 * time.Second}, &calls
+	return &jev.Client{BaseURL: srv.URL, Key: "apik-test", Timeout: 5 * time.Second}, calls
 }
 
 // With a fake that flags exactly the defective items, every expectation is met, the good cases have
@@ -170,7 +171,7 @@ func fake(t *testing.T, adverseItems map[string]bool, delay time.Duration) (*jev
 func TestRunJudgesExpectations(t *testing.T) {
 	c, calls := fake(t, map[string]bool{"S-001": true, "S-002": true, "R-002": true, "S-003": true, "R-006": true, "A-*": true}, 0)
 	rep := Run(context.Background(), c, Cases, DefaultCaps)
-	if *calls != 47 || rep.Requests != 47 || rep.Skipped != 0 || rep.Errors != 0 || rep.InputTokens != 47000 || rep.Model != "jev-1.13.0" {
+	if calls.Load() != 47 || rep.Requests != 47 || rep.Skipped != 0 || rep.Errors != 0 || rep.InputTokens != 47000 || rep.Model != "jev-1.13.0" {
 		t.Fatalf("report %+v", rep)
 	}
 	if rep.CostUSD < 0.0019 || rep.CostUSD > 0.0020 {
@@ -212,7 +213,7 @@ func TestRunReportsMisses(t *testing.T) {
 func TestRunStopsAtCaps(t *testing.T) {
 	c, calls := fake(t, nil, 0)
 	rep := Run(context.Background(), c, Cases, Caps{MaxRequests: 10, MaxElapsed: time.Minute})
-	if *calls != 10 || rep.Requests != 10 || rep.Skipped != 37 || rep.StoppedBy != "request cap 10" {
+	if calls.Load() != 10 || rep.Requests != 10 || rep.Skipped != 37 || rep.StoppedBy != "request cap 10" {
 		t.Fatalf("%+v", rep)
 	}
 	if ok, why := rep.Decision(); ok || !strings.Contains(why, "37 skipped") {
@@ -220,8 +221,8 @@ func TestRunStopsAtCaps(t *testing.T) {
 	}
 	c, calls = fake(t, nil, 30*time.Millisecond)
 	rep = Run(context.Background(), c, Cases, Caps{MaxRequests: 100, MaxElapsed: 100 * time.Millisecond})
-	if *calls >= 47 || rep.Skipped == 0 || !strings.HasPrefix(rep.StoppedBy, "time cap") {
-		t.Fatalf("time cap: calls %d skipped %d stopped %q", *calls, rep.Skipped, rep.StoppedBy)
+	if calls.Load() >= 47 || rep.Skipped == 0 || !strings.HasPrefix(rep.StoppedBy, "time cap") {
+		t.Fatalf("time cap: calls %d skipped %d stopped %q", calls.Load(), rep.Skipped, rep.StoppedBy)
 	}
 }
 
