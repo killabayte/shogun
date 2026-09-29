@@ -1,6 +1,7 @@
 package jev
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -8,10 +9,11 @@ import (
 )
 
 // The outbound guard: nothing that looks like a secret, a credential, a person's address or an
-// internal identifier leaves for Jev. It runs inside Ask on the serialized state, so no caller can
-// bypass it, and it blocks the whole request rather than redacting — a redacted plan item is
-// still context around a secret. Matches are reported by pattern name and count only; the text
-// itself is never repeated.
+// internal identifier leaves for Jev. It runs inside Ask over the request's audit text — the
+// state's strings as written and every question with its criteria (Audit) — so no caller can
+// bypass it and no JSON escaping hides a quote or a line break from a pattern. It blocks the whole
+// request rather than redacting: a redacted plan item is still context around a secret. Matches
+// are reported by pattern name and count only; the text itself is never repeated.
 
 // Pattern is one built-in or configured check.
 type Pattern struct {
@@ -37,8 +39,8 @@ var BuiltinPatterns = []Pattern{
 	{"jwt", regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}`)},
 	{"private_key", regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`)},
 	{"bearer_token", regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{12,}`)},
-	{"credential_assignment", regexp.MustCompile(`(?i)\b(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret|authorization)\b\s*[=:]\s*["']?[^\s"']{6,}`)},
-	{"token_assignment", regexp.MustCompile(`(?i)\btoken\b\s*[=:]\s*["']?[^\s"']{8,}`)},
+	{"credential_assignment", regexp.MustCompile(`(?i)\b(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret|authorization)\b["']?\s*[=:]\s*["']?[^\s"']{6,}`)},
+	{"token_assignment", regexp.MustCompile(`(?i)\btoken\b["']?\s*[=:]\s*["']?[^\s"']{8,}`)},
 	{"credential_url", regexp.MustCompile(`\b[a-z][a-z0-9+.-]*://[^/\s:@]+:[^@\s/]+@`)},
 	{"email", regexp.MustCompile(`\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b`)},
 	{"ipv4", regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)},
@@ -80,10 +82,76 @@ func Describe(ms []Match) string {
 	return strings.Join(parts, ", ")
 }
 
-// guard refuses a state that matches any pattern. It never quotes the state.
-func (c *Client) guard(stateJSON []byte) error {
-	if ms := Scan(string(stateJSON), c.Deny); len(ms) > 0 {
-		return &Error{Class: ClassSensitive, Msg: "state refused by the outbound guard: " + Describe(ms)}
+// Audit renders everything a request would carry — the state's keys and strings as plain text
+// (no JSON escaping, so quotes and line breaks read as written) and every question's name, type,
+// instructions and criteria — one representation that the guard scans and that a human can read
+// before anything is sent. The authorization header is not part of it.
+func Audit(state any, questions map[string]Question) string {
+	var b strings.Builder
+	b.WriteString("# state\n")
+	var v any
+	if raw, err := json.Marshal(state); err == nil {
+		json.Unmarshal(raw, &v)
+	}
+	flatten(&b, "", v)
+	b.WriteString("# questions\n")
+	names := make([]string, 0, len(questions))
+	for n := range questions {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		q := questions[n]
+		fmt.Fprintf(&b, "%s (%s): %s\n", n, q.Type, q.Instructions)
+		switch crit := q.Criteria.(type) {
+		case map[string]string:
+			opts := make([]string, 0, len(crit))
+			for o := range crit {
+				opts = append(opts, o)
+			}
+			sort.Strings(opts)
+			for _, o := range opts {
+				fmt.Fprintf(&b, "  - %s: %s\n", o, crit[o])
+			}
+		case []string:
+			for i, l := range crit {
+				fmt.Fprintf(&b, "  %d: %s\n", i, l)
+			}
+		}
+	}
+	return b.String()
+}
+
+func flatten(b *strings.Builder, path string, v any) {
+	switch x := v.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			p := k
+			if path != "" {
+				p = path + "." + k
+			}
+			flatten(b, p, x[k])
+		}
+	case []any:
+		for i, e := range x {
+			flatten(b, fmt.Sprintf("%s[%d]", path, i), e)
+		}
+	case nil:
+		fmt.Fprintf(b, "%s: null\n", path)
+	default:
+		fmt.Fprintf(b, "%s: %v\n", path, x)
+	}
+}
+
+// guard refuses a request whose audit text matches any pattern. It never quotes the text.
+func (c *Client) guard(state any, questions map[string]Question) error {
+	if ms := Scan(Audit(state, questions), c.Deny); len(ms) > 0 {
+		return &Error{Class: ClassSensitive, Msg: "request refused by the outbound guard: " + Describe(ms)}
 	}
 	return nil
 }

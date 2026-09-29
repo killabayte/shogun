@@ -158,7 +158,7 @@ func (c *Client) Ask(ctx context.Context, state any, questions map[string]Questi
 	if err != nil {
 		return nil, &Error{Class: ClassLimit, Msg: "state is not serializable: " + err.Error()}
 	}
-	if err := c.guard(stateJSON); err != nil { // before anything else: nothing sensitive leaves
+	if err := c.guard(state, questions); err != nil { // before anything else: nothing sensitive leaves
 		return nil, err
 	}
 	if err := checkLimits(stateJSON, questions); err != nil {
