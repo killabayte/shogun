@@ -219,20 +219,25 @@ func (c *Client) do(ctx context.Context, body []byte, questions map[string]Quest
 		return nil, &Error{Class: ClassShape, Status: resp.StatusCode, Msg: "response larger than 1 MiB"}
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, &Error{Class: classOf(resp.StatusCode), Status: resp.StatusCode, Msg: apiMessage(raw)}
+		// Scrubbed before any excerpt is cut, so a key crossing the excerpt boundary cannot survive.
+		return nil, &Error{Class: classOf(resp.StatusCode), Status: resp.StatusCode, Msg: apiMessage(scrub(string(raw), c.Key))}
 	}
 	var wire struct {
 		Model   string            `json:"model"`
 		Answers map[string]Answer `json:"answers"`
-		Usage   *Usage            `json:"usage"`
+		Usage   *struct {
+			InputTokens  *int64 `json:"input_tokens"`
+			OutputTokens *int64 `json:"output_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal(raw, &wire); err != nil {
 		return nil, &Error{Class: ClassShape, Msg: "response is not JSON: " + err.Error()}
 	}
-	if wire.Usage == nil {
-		return nil, &Error{Class: ClassShape, Msg: "response carries no usage"}
+	// Usage is what is billed: both counters must be present, or the request is not accounted.
+	if wire.Usage == nil || wire.Usage.InputTokens == nil || wire.Usage.OutputTokens == nil {
+		return nil, &Error{Class: ClassShape, Msg: "response carries no complete usage"}
 	}
-	res := &Result{Model: wire.Model, Answers: wire.Answers, Usage: *wire.Usage, Latency: latency}
+	res := &Result{Model: wire.Model, Answers: wire.Answers, Usage: Usage{InputTokens: *wire.Usage.InputTokens, OutputTokens: *wire.Usage.OutputTokens}, Latency: latency}
 	if err := validate(res, c.model(), questions); err != nil {
 		return nil, err
 	}
@@ -343,7 +348,7 @@ func validate(res *Result, requested string, questions map[string]Question) erro
 			if !keys[a.Choice] {
 				return &Error{Class: ClassShape, Msg: fmt.Sprintf("%s: the chosen option is not one offered", name)}
 			}
-			if err := distribution(name, a.Probabilities, keys, a.Choice); err != nil {
+			if err := distribution(name, a.Probabilities, keys); err != nil {
 				return err
 			}
 			if a.Confidence == nil || !unit(*a.Confidence) {
@@ -358,11 +363,19 @@ func validate(res *Result, requested string, questions map[string]Question) erro
 			if a.Score == nil || *a.Score < 0 || *a.Score > float64(len(levels)-1) {
 				return &Error{Class: ClassShape, Msg: name + ": score missing or outside its levels"}
 			}
-			if err := distribution(name, a.Probabilities, keys, ""); err != nil {
+			if err := distribution(name, a.Probabilities, keys); err != nil {
 				return err
 			}
 			if a.Confidence == nil || !unit(*a.Confidence) {
 				return &Error{Class: ClassShape, Msg: name + ": confidence missing or outside [0,1]"}
+			}
+			if len(a.Legend) != len(levels) {
+				return &Error{Class: ClassShape, Msg: name + ": legend missing or not one entry per level"}
+			}
+			for k := range a.Legend {
+				if !keys[k] {
+					return &Error{Class: ClassShape, Msg: name + ": legend names a level that was not offered"}
+				}
 			}
 		}
 	}
@@ -371,26 +384,21 @@ func validate(res *Result, requested string, questions map[string]Question) erro
 
 func unit(p float64) bool { return p >= 0 && p <= 1 && p == p }
 
-// distribution checks a probability map: keys are exactly the allowed ones (a missing key counts
-// as absent probability for a selected option), every value in [0,1], the sum 1 within tolerance.
-func distribution(name string, probs map[string]float64, allowed map[string]bool, selected string) *Error {
-	if len(probs) == 0 {
-		return &Error{Class: ClassShape, Msg: name + ": no probabilities"}
+// distribution checks a probability map: its keys are exactly the offered options or levels (none
+// missing, none extra), every value in [0,1], the sum 1 within tolerance.
+func distribution(name string, probs map[string]float64, allowed map[string]bool) *Error {
+	if len(probs) != len(allowed) {
+		return &Error{Class: ClassShape, Msg: fmt.Sprintf("%s: %d probabilities for %d offered outcomes", name, len(probs), len(allowed))}
 	}
 	sum := 0.0
 	for k, p := range probs {
 		if !allowed[k] {
-			return &Error{Class: ClassShape, Msg: name + ": a probability for an option that was not offered"}
+			return &Error{Class: ClassShape, Msg: name + ": a probability for an outcome that was not offered"}
 		}
 		if !unit(p) {
 			return &Error{Class: ClassShape, Msg: name + ": a probability outside [0,1]"}
 		}
 		sum += p
-	}
-	if selected != "" {
-		if _, ok := probs[selected]; !ok {
-			return &Error{Class: ClassShape, Msg: name + ": no probability for the chosen option"}
-		}
 	}
 	if sum < 1-probabilityTolerance || sum > 1+probabilityTolerance {
 		return &Error{Class: ClassShape, Msg: fmt.Sprintf("%s: probabilities sum to %.2f", name, sum)}
@@ -413,7 +421,9 @@ func classOf(status int) Class {
 }
 
 // apiMessage extracts {"error":{"type","message"}} when present, else a short excerpt of the body.
-func apiMessage(raw []byte) string {
+// The caller scrubs the body first.
+func apiMessage(body string) string {
+	raw := []byte(body)
 	var e struct {
 		Error struct {
 			Type, Message string
