@@ -1,6 +1,7 @@
 package config
 
 import (
+	"github.com/killabayte/shogun/internal/jev"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,5 +143,40 @@ func mustWrite(t *testing.T, path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Jev keys: defaults match the jev package, the mode is validated, the key variable is a name (never
+// a value), and everything survives the snapshot round trip.
+func TestJevConfigKeys(t *testing.T) {
+	if d := Default(); d.Jev != JevOff || d.JevKeyEnv != jev.DefaultKeyEnv || d.JevModel != jev.DefaultModel {
+		t.Fatalf("defaults %+v", d)
+	}
+	if l, _ := Load(t.TempDir(), Overrides{}, env(map[string]string{"HOME": t.TempDir()})); l.Provenance["jev"] != "default" || l.Provenance["jev_model"] != "default" {
+		t.Fatalf("default provenance missing: %v", l.Provenance)
+	}
+	ws := t.TempDir()
+	mustWrite(t, filepath.Join(ws, ".shogun", "config.toml"), "jev = \"advisory\"\njev_api_key_env = \"JEV_DEFAULT_TEST\"\n")
+	l, err := Load(ws, Overrides{}, env(map[string]string{"HOME": t.TempDir()}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l.Config.Jev != JevAdvisory || l.Config.JevKeyEnv != "JEV_DEFAULT_TEST" || l.Config.JevModel != jev.DefaultModel || !strings.HasPrefix(string(l.Provenance["jev"]), "file:") {
+		t.Fatalf("%+v %v", l.Config, l.Provenance)
+	}
+	data, _ := l.Snapshot()
+	p := filepath.Join(t.TempDir(), "config.snapshot.toml")
+	os.WriteFile(p, data, 0o600)
+	if back, err := LoadSnapshot(p); err != nil || *back != l.Config {
+		t.Fatalf("round trip: %v\n%s", err, data)
+	}
+	if strings.Contains(string(data), "apik") {
+		t.Fatal("a key value reached the snapshot")
+	}
+	for _, bad := range []string{"jev = \"on\"\n", "jev = \"auto\"\n", "jev_api_key_env = \"JEV-DEFAULT-TEST\"\n", "jev_model = \"\"\n"} {
+		mustWrite(t, filepath.Join(ws, ".shogun", "config.toml"), bad)
+		if _, err := Load(ws, Overrides{}, env(map[string]string{"HOME": t.TempDir()})); err == nil {
+			t.Fatalf("%q must fail", bad)
+		}
 	}
 }
