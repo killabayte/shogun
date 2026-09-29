@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,5 +75,108 @@ func TestStatsCountsEveryRunAndFlagsMissingUsage(t *testing.T) {
 	}
 	if after, _ := os.ReadFile(filepath.Join(root, "20260927-000001-a", "state.json")); string(after) != string(before) {
 		t.Fatal("stats changed a run")
+	}
+
+	// --json: the same data as one document; every run object has every key, damaged runs with null.
+	code, out, errs = runCLI(t, ws, "stats", "--json")
+	if code != ExitOK || strings.Contains(out, "CLAUDE $") || strings.Contains(out, "total:") {
+		t.Fatalf("stats --json: %d %q %q", code, out, errs)
+	}
+	var doc struct {
+		Runs   []map[string]any `json:"runs"`
+		Totals map[string]any   `json:"totals"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("stats --json is not one JSON document: %v\n%s", err, out)
+	}
+	if len(doc.Runs) != 5 || doc.Totals == nil {
+		t.Fatalf("runs %d totals %v", len(doc.Runs), doc.Totals)
+	}
+	keys := []string{"id", "status", "mode", "planner", "reviewer", "attempts", "active_seconds", "input_tokens", "cache_read_tokens",
+		"cache_write_tokens", "output_tokens", "reasoning_tokens", "cost_usd", "usage", "damaged"}
+	byID := map[string]map[string]any{}
+	for i, r := range doc.Runs {
+		for _, k := range keys {
+			if _, ok := r[k]; !ok {
+				t.Fatalf("run %d lacks key %q: %v", i, k, r)
+			}
+		}
+		if i > 0 && doc.Runs[i-1]["id"].(string) > r["id"].(string) {
+			t.Fatalf("runs not sorted by id: %v", doc.Runs)
+		}
+		byID[r["id"].(string)] = r
+	}
+	a := byID["20260927-000001-a"]
+	for k, want := range map[string]any{"status": "approved", "mode": "fast", "planner": "claude/opus:high", "reviewer": "codex/gpt-6-astra:high",
+		"attempts": 2.0, "active_seconds": 150.0, "input_tokens": 100.0, "cache_read_tokens": 1000.0, "cache_write_tokens": 0.0,
+		"output_tokens": 50.0, "reasoning_tokens": 20.0, "cost_usd": 0.5, "usage": "ok", "damaged": nil} {
+		if a[k] != want {
+			t.Fatalf("run a %s = %v, want %v", k, a[k], want)
+		}
+	}
+	if byID["20260927-000002-b"]["usage"] != "unknown" {
+		t.Fatalf("run b usage %v", byID["20260927-000002-b"]["usage"])
+	}
+	d := byID["20260927-000003-c"]
+	for _, k := range keys[2:14] { // mode … usage
+		if v, ok := d[k]; !ok || v != nil {
+			t.Fatalf("damaged run %s = %v (present %v), want null", k, v, ok)
+		}
+	}
+	if d["status"] != "damaged" || d["damaged"] == nil || d["damaged"].(string) == "" {
+		t.Fatalf("damaged run: %v", d)
+	}
+	for k, want := range map[string]any{"runs": 5.0, "damaged": 1.0, "attempts": 6.0, "active_seconds": 750.0, "input_tokens": 100.0,
+		"cache_read_tokens": 1000.0, "cache_write_tokens": 0.0, "output_tokens": 50.0, "reasoning_tokens": 20.0, "cost_usd": 0.5,
+		"spend_lower_bound": true, "tokens_lower_bound": true} {
+		if doc.Totals[k] != want {
+			t.Fatalf("totals %s = %v, want %v", k, doc.Totals[k], want)
+		}
+	}
+	if bs, _ := doc.Totals["by_status"].(map[string]any); len(bs) != 4 || bs["approved"] != 1.0 || bs["failed"] != 1.0 || bs["needs_input"] != 1.0 || bs["paused"] != 1.0 {
+		t.Fatalf("by_status %v", doc.Totals["by_status"])
+	}
+	if after, _ := os.ReadFile(filepath.Join(root, "20260927-000001-a", "state.json")); string(after) != string(before) {
+		t.Fatal("stats --json changed a run")
+	}
+}
+
+// An empty runs directory: --json still prints one document (empty runs, zero totals, exit 0);
+// the text mode keeps its stderr note and empty stdout.
+func TestStatsJSONEmptyDir(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ws := t.TempDir()
+	if err := os.MkdirAll(run.RunsRoot(ws), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errs := runCLI(t, ws, "stats", "--json")
+	if code != ExitOK || strings.Contains(errs, "no runs in") {
+		t.Fatalf("stats --json on an empty dir: %d %q %q", code, out, errs)
+	}
+	var doc struct {
+		Runs   []any          `json:"runs"`
+		Totals map[string]any `json:"totals"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("not one JSON document: %v\n%s", err, out)
+	}
+	if doc.Runs == nil || len(doc.Runs) != 0 {
+		t.Fatalf("runs = %v, want []", doc.Runs)
+	}
+	if bs, ok := doc.Totals["by_status"].(map[string]any); !ok || len(bs) != 0 {
+		t.Fatalf("by_status = %v, want {}", doc.Totals["by_status"])
+	}
+	for _, k := range []string{"runs", "damaged", "attempts", "active_seconds", "input_tokens", "cache_read_tokens", "cache_write_tokens",
+		"output_tokens", "reasoning_tokens", "cost_usd"} {
+		if v, ok := doc.Totals[k]; !ok || v != 0.0 {
+			t.Fatalf("totals %s = %v (present %v), want 0", k, v, ok)
+		}
+	}
+	if doc.Totals["spend_lower_bound"] != false || doc.Totals["tokens_lower_bound"] != false {
+		t.Fatalf("lower-bound flags: %v", doc.Totals)
+	}
+	code, out, errs = runCLI(t, ws, "stats")
+	if code != ExitOK || out != "" || !strings.Contains(errs, "no runs in") {
+		t.Fatalf("text mode on an empty dir: %d %q %q", code, out, errs)
 	}
 }
