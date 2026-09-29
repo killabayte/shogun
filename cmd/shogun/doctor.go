@@ -180,11 +180,12 @@ func (a *app) jevLive(cfg config.Config, key string) bool {
 	rec := jevRecord{Model: res.Model, Requested: cfg.JevModel, LatencyMS: res.Latency.Milliseconds(), KeyEnv: cfg.JevKeyEnv, BaseURL: jevBaseURL, At: time.Now().UTC().Format(time.RFC3339)}
 	path := jevRecordPath(a.cwd)
 	b, _ := json.MarshalIndent(rec, "", " ")
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err == nil {
-		err = os.WriteFile(path, b, 0o600)
+	werr := os.MkdirAll(filepath.Dir(path), 0o700)
+	if werr == nil {
+		werr = os.WriteFile(path, b, 0o600)
 	}
-	if err != nil {
-		fmt.Fprintf(a.stdout, "FAIL %-16s %s answered, but the record could not be written: %v\n", "jev live", res.Model, err)
+	if werr != nil {
+		fmt.Fprintf(a.stdout, "FAIL %-16s %s answered, but the record could not be written: %v\n", "jev live", res.Model, werr)
 		return false
 	}
 	fmt.Fprintf(a.stdout, "ok   %-16s %s answered in %d ms (%d input tokens); recorded %s\n", "jev live", res.Model, rec.LatencyMS, res.Usage.InputTokens, path)
