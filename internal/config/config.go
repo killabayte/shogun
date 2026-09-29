@@ -31,7 +31,21 @@ type Config struct {
 	MaxCalls         int           // 0 = derived from outline (2R(B+3)); counts physical attempts
 	MaxTime          time.Duration // 0 = derived
 	MaxContextTokens int           // heuristic threshold before integration
+
+	// Jev (docs/plans/shogun-jev.md): an advisory classifier, off by default. JevKeyEnv names the
+	// environment variable that holds the key; the key itself is never a config value.
+	Jev       string // "off" | "advisory"
+	JevKeyEnv string // default TYPESAFE_API_KEY
+	JevModel  string // pinned model id; aliases move on their own
 }
+
+// Jev modes and defaults (kept in sync with internal/jev by a test).
+const (
+	JevOff        = "off"
+	JevAdvisory   = "advisory"
+	JevDefaultEnv = "TYPESAFE_API_KEY"
+	JevDefault    = "jev-1.13.0"
+)
 
 // Source tells where an effective value came from.
 type Source string
@@ -67,6 +81,9 @@ type fileConfig struct {
 	MaxCalls         *int    `toml:"max_calls"`
 	MaxTime          *string `toml:"max_time"`
 	MaxContextTokens *int    `toml:"max_context_tokens"`
+	Jev              *string `toml:"jev"`
+	JevAPIKeyEnv     *string `toml:"jev_api_key_env"`
+	JevModel         *string `toml:"jev_model"`
 }
 
 // Default returns the built-in defaults.
@@ -78,6 +95,7 @@ func Default() Config {
 		ClaudeCommand: "claude", CodexCommand: "codex",
 		ReviewRounds: 6, DetailBatch: 1, CallDeadline: 30 * time.Minute,
 		MaxContextTokens: 400_000,
+		Jev:              JevOff, JevKeyEnv: JevDefaultEnv, JevModel: JevDefault,
 	}
 }
 
@@ -212,6 +230,18 @@ func (l *Loaded) apply(fc *fileConfig, src Source, baseDir string, getenv func(s
 		l.Config.MaxContextTokens = *fc.MaxContextTokens
 		set("max_context_tokens")
 	}
+	if fc.Jev != nil {
+		l.Config.Jev = *fc.Jev
+		set("jev")
+	}
+	if fc.JevAPIKeyEnv != nil {
+		l.Config.JevKeyEnv = *fc.JevAPIKeyEnv
+		set("jev_api_key_env")
+	}
+	if fc.JevModel != nil {
+		l.Config.JevModel = *fc.JevModel
+		set("jev_model")
+	}
 	return nil
 }
 
@@ -316,10 +346,32 @@ func (c Config) Validate() error {
 	if c.Project != "" && !ValidProject(c.Project) {
 		errs = append(errs, fmt.Sprintf("project %q must be a single safe path segment", c.Project))
 	}
+	if c.Jev != JevOff && c.Jev != JevAdvisory {
+		errs = append(errs, fmt.Sprintf("jev must be %q or %q, not %q", JevOff, JevAdvisory, c.Jev))
+	}
+	if !validEnvName(c.JevKeyEnv) {
+		errs = append(errs, fmt.Sprintf("jev_api_key_env %q is not an environment variable name", c.JevKeyEnv))
+	}
+	if c.JevModel == "" {
+		errs = append(errs, "jev_model must not be empty")
+	}
 	if len(errs) > 0 {
 		return fmt.Errorf("invalid configuration:\n  - %s", strings.Join(errs, "\n  - "))
 	}
 	return nil
+}
+
+// validEnvName accepts [A-Za-z_][A-Za-z0-9_]*.
+func validEnvName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		if !(r == '_' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || i > 0 && r >= '0' && r <= '9') {
+			return false
+		}
+	}
+	return true
 }
 
 // ValidProject accepts one path segment of [A-Za-z0-9._-], not "." or "..".
@@ -351,6 +403,9 @@ type snapshot struct {
 	MaxCalls         int    `toml:"max_calls"`
 	MaxTime          string `toml:"max_time"`
 	MaxContextTokens int    `toml:"max_context_tokens"`
+	Jev              string `toml:"jev"`
+	JevAPIKeyEnv     string `toml:"jev_api_key_env"`
+	JevModel         string `toml:"jev_model"`
 }
 
 // Snapshot renders the effective configuration as valid TOML with provenance in comments.
@@ -364,6 +419,7 @@ func (l *Loaded) Snapshot() ([]byte, error) {
 		ReviewRounds: c.ReviewRounds, DetailBatch: c.DetailBatch,
 		CallDeadline: c.CallDeadline.String(), MaxCalls: c.MaxCalls, MaxTime: c.MaxTime.String(),
 		MaxContextTokens: c.MaxContextTokens,
+		Jev:              c.Jev, JevAPIKeyEnv: c.JevKeyEnv, JevModel: c.JevModel,
 	})
 	if err != nil {
 		return nil, err
@@ -413,6 +469,7 @@ func (l *Loaded) Describe(w io.Writer) {
 		"review_rounds": fmt.Sprint(c.ReviewRounds), "detail_batch": fmt.Sprint(c.DetailBatch),
 		"call_deadline": c.CallDeadline.String(), "max_calls": fmt.Sprint(c.MaxCalls), "max_time": c.MaxTime.String(),
 		"max_context_tokens": fmt.Sprint(c.MaxContextTokens),
+		"jev":                c.Jev, "jev_api_key_env": c.JevKeyEnv, "jev_model": c.JevModel,
 	}
 	keys := make([]string, 0, len(rows))
 	for k := range rows {
