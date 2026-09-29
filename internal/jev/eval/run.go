@@ -122,15 +122,18 @@ func Run(ctx context.Context, c *jev.Client, cases []Case, caps Caps) *Report {
 			}
 			rep.Requests++
 			res, err := c.Ask(runCtx, it.State, it.Questions)
+			// The deadline is judged on its own, whatever Ask returned: an answer that arrives after
+			// the cap is not evidence of a run within the cap.
+			if runCtx.Err() != nil {
+				stopped, rep.StoppedBy = true, fmt.Sprintf("time cap %s", caps.MaxElapsed)
+				ir.Skipped = true
+				rep.Skipped++
+				cr.Items = append(cr.Items, ir)
+				continue
+			}
 			if err != nil {
-				if runCtx.Err() != nil { // the cap cut this request
-					stopped, rep.StoppedBy = true, fmt.Sprintf("time cap %s", caps.MaxElapsed)
-					ir.Skipped = true
-					rep.Skipped++
-				} else {
-					ir.Err = err.Error()
-					rep.Errors++
-				}
+				ir.Err = err.Error()
+				rep.Errors++
 				cr.Items = append(cr.Items, ir)
 				continue
 			}
