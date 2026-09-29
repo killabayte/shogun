@@ -29,8 +29,14 @@ const (
 	MaxStateTokens = 32_000
 	// MaxQuestions per request is Shogun's own rule for atomic, per-item requests.
 	MaxQuestions = 8
-	// DefaultTimeout bounds one request; Jev answers in well under a second.
-	DefaultTimeout = 10 * time.Second
+	// MaxRequestTokens is the documented request budget of Jev 1.13 (state plus all questions).
+	MaxRequestTokens = 64_000
+	// DefaultTimeout bounds one request (design §4); Jev answers in well under a second.
+	DefaultTimeout = 5 * time.Second
+	// Aliases resolve to a versioned id on the server; a pinned id must come back unchanged.
+	aliasLatest, aliasPreview = "jev-latest", "jev-preview"
+	// probabilityTolerance is the accepted deviation of a distribution's sum from 1 (rounding).
+	probabilityTolerance = 0.02
 
 	charsPerToken = 4
 )
@@ -158,6 +164,22 @@ func (c *Client) Ask(ctx context.Context, state any, questions map[string]Questi
 		State     json.RawMessage     `json:"state"`
 		Questions map[string]Question `json:"questions"`
 	}{c.model(), stateJSON, questions})
+	res, err := c.do(ctx, body, questions)
+	if err != nil {
+		// Every message that could carry external text passes through scrub: an API error
+		// envelope, a body excerpt, a shape message quoting a returned field.
+		var e *Error
+		if errors.As(err, &e) {
+			e.Msg = scrub(e.Msg, c.Key)
+		}
+		return nil, err
+	}
+	return res, nil
+}
+
+const maxResponseBytes = 1 << 20
+
+func (c *Client) do(ctx context.Context, body []byte, questions map[string]Question) (*Result, error) {
 
 	timeout := c.Timeout
 	if timeout <= 0 {
@@ -184,20 +206,37 @@ func (c *Client) Ask(ctx context.Context, state any, questions map[string]Questi
 		return nil, &Error{Class: ClassTransport, Msg: scrub(err.Error(), c.Key)}
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	raw, rerr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	latency := time.Since(start)
+	if rerr != nil {
+		// A truncated body is not a completed request, whatever its prefix parses as.
+		if errors.Is(rerr, context.DeadlineExceeded) || isTimeout(rerr) {
+			return nil, &Error{Class: ClassTimeout, Msg: fmt.Sprintf("the response did not arrive within %s", timeout)}
+		}
+		return nil, &Error{Class: ClassTransport, Status: resp.StatusCode, Msg: "reading the response body: " + rerr.Error()}
+	}
+	if len(raw) > maxResponseBytes {
+		return nil, &Error{Class: ClassShape, Status: resp.StatusCode, Msg: "response larger than 1 MiB"}
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, &Error{Class: classOf(resp.StatusCode), Status: resp.StatusCode, Msg: apiMessage(raw)}
 	}
-	var res Result
-	if err := json.Unmarshal(raw, &res); err != nil {
+	var wire struct {
+		Model   string            `json:"model"`
+		Answers map[string]Answer `json:"answers"`
+		Usage   *Usage            `json:"usage"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
 		return nil, &Error{Class: ClassShape, Msg: "response is not JSON: " + err.Error()}
 	}
-	res.Latency = latency
-	if err := validate(&res, questions); err != nil {
+	if wire.Usage == nil {
+		return nil, &Error{Class: ClassShape, Msg: "response carries no usage"}
+	}
+	res := &Result{Model: wire.Model, Answers: wire.Answers, Usage: *wire.Usage, Latency: latency}
+	if err := validate(res, c.model(), questions); err != nil {
 		return nil, err
 	}
-	return &res, nil
+	return res, nil
 }
 
 func (c *Client) model() string {
@@ -219,12 +258,25 @@ func EstimateTokens(stateJSON []byte) int {
 	return (len(stateJSON) + charsPerToken - 1) / charsPerToken
 }
 
+// checkLimits is a heuristic (4 characters per token), not the provider's tokenizer: the state
+// plus the longest question must fit the 32k-token budget, the whole request the 64k one.
 func checkLimits(stateJSON []byte, questions map[string]Question) error {
-	if n := EstimateTokens(stateJSON); n > MaxStateTokens {
-		return &Error{Class: ClassLimit, Msg: fmt.Sprintf("state is about %d tokens, above the %d-token budget", n, MaxStateTokens)}
-	}
 	if len(questions) == 0 || len(questions) > MaxQuestions {
 		return &Error{Class: ClassLimit, Msg: fmt.Sprintf("%d question(s); 1 to %d per request", len(questions), MaxQuestions)}
+	}
+	longest, all := 0, 0
+	for _, q := range questions {
+		b, _ := json.Marshal(q)
+		all += len(b)
+		if len(b) > longest {
+			longest = len(b)
+		}
+	}
+	if n := EstimateTokens(stateJSON) + EstimateTokens(make([]byte, longest)); n > MaxStateTokens {
+		return &Error{Class: ClassLimit, Msg: fmt.Sprintf("state plus the longest question is about %d tokens, above the %d-token budget", n, MaxStateTokens)}
+	}
+	if n := EstimateTokens(stateJSON) + EstimateTokens(make([]byte, all)); n > MaxRequestTokens {
+		return &Error{Class: ClassLimit, Msg: fmt.Sprintf("the request is about %d tokens, above the %d-token budget", n, MaxRequestTokens)}
 	}
 	for name, q := range questions {
 		if !reName.MatchString(name) {
@@ -252,9 +304,22 @@ func checkLimits(stateJSON []byte, questions map[string]Question) error {
 	return nil
 }
 
-func validate(res *Result, questions map[string]Question) error {
-	if res.Model == "" {
+// validate holds the response to the contract: the requested model (an alias may resolve to any
+// versioned id; a pinned id must come back unchanged), non-negative usage, and for every question an
+// answer of its type whose values are probabilities — a choice's distribution over exactly the
+// offered options, a score's over exactly its levels, each summing to 1 within the tolerance, with
+// a confidence in [0,1].
+func validate(res *Result, requested string, questions map[string]Question) error {
+	switch {
+	case res.Model == "":
 		return &Error{Class: ClassShape, Msg: "response names no model"}
+	case requested != aliasLatest && requested != aliasPreview && res.Model != requested:
+		return &Error{Class: ClassShape, Msg: fmt.Sprintf("response from model %q, requested %q", res.Model, requested)}
+	case !strings.HasPrefix(res.Model, "jev-"):
+		return &Error{Class: ClassShape, Msg: fmt.Sprintf("response from an unexpected model %q", res.Model)}
+	}
+	if res.Usage.InputTokens < 0 || res.Usage.OutputTokens < 0 {
+		return &Error{Class: ClassShape, Msg: "negative usage"}
 	}
 	for name, q := range questions {
 		a, ok := res.Answers[name]
@@ -266,20 +331,69 @@ func validate(res *Result, questions map[string]Question) error {
 		}
 		switch q.Type {
 		case "noul":
-			if a.Noul == nil || *a.Noul < 0 || *a.Noul > 1 {
+			if a.Noul == nil || !unit(*a.Noul) {
 				return &Error{Class: ClassShape, Msg: name + ": noul missing or outside [0,1]"}
 			}
 		case "choice":
 			opts := q.Criteria.(map[string]string)
-			if _, known := opts[a.Choice]; !known || len(a.Probabilities) == 0 {
-				return &Error{Class: ClassShape, Msg: fmt.Sprintf("%s: choice %q is not an option, or no probabilities", name, a.Choice)}
+			keys := map[string]bool{}
+			for o := range opts {
+				keys[o] = true
+			}
+			if !keys[a.Choice] {
+				return &Error{Class: ClassShape, Msg: fmt.Sprintf("%s: the chosen option is not one offered", name)}
+			}
+			if err := distribution(name, a.Probabilities, keys, a.Choice); err != nil {
+				return err
+			}
+			if a.Confidence == nil || !unit(*a.Confidence) {
+				return &Error{Class: ClassShape, Msg: name + ": confidence missing or outside [0,1]"}
 			}
 		case "score":
 			levels := q.Criteria.([]string)
-			if a.Score == nil || *a.Score < 0 || *a.Score > float64(len(levels)-1) || len(a.Probabilities) == 0 {
-				return &Error{Class: ClassShape, Msg: name + ": score missing, outside its levels, or no probabilities"}
+			keys := map[string]bool{}
+			for i := range levels {
+				keys[fmt.Sprint(i)] = true
+			}
+			if a.Score == nil || *a.Score < 0 || *a.Score > float64(len(levels)-1) {
+				return &Error{Class: ClassShape, Msg: name + ": score missing or outside its levels"}
+			}
+			if err := distribution(name, a.Probabilities, keys, ""); err != nil {
+				return err
+			}
+			if a.Confidence == nil || !unit(*a.Confidence) {
+				return &Error{Class: ClassShape, Msg: name + ": confidence missing or outside [0,1]"}
 			}
 		}
+	}
+	return nil
+}
+
+func unit(p float64) bool { return p >= 0 && p <= 1 && p == p }
+
+// distribution checks a probability map: keys are exactly the allowed ones (a missing key counts
+// as absent probability for a selected option), every value in [0,1], the sum 1 within tolerance.
+func distribution(name string, probs map[string]float64, allowed map[string]bool, selected string) *Error {
+	if len(probs) == 0 {
+		return &Error{Class: ClassShape, Msg: name + ": no probabilities"}
+	}
+	sum := 0.0
+	for k, p := range probs {
+		if !allowed[k] {
+			return &Error{Class: ClassShape, Msg: name + ": a probability for an option that was not offered"}
+		}
+		if !unit(p) {
+			return &Error{Class: ClassShape, Msg: name + ": a probability outside [0,1]"}
+		}
+		sum += p
+	}
+	if selected != "" {
+		if _, ok := probs[selected]; !ok {
+			return &Error{Class: ClassShape, Msg: name + ": no probability for the chosen option"}
+		}
+	}
+	if sum < 1-probabilityTolerance || sum > 1+probabilityTolerance {
+		return &Error{Class: ClassShape, Msg: fmt.Sprintf("%s: probabilities sum to %.2f", name, sum)}
 	}
 	return nil
 }
@@ -326,7 +440,8 @@ func isTimeout(err error) bool {
 	return errors.As(err, &ne) && ne.Timeout()
 }
 
-// scrub removes the key from a message, should a transport error ever echo the request.
+// scrub removes the key from any message built from external text (error envelopes, body
+// excerpts, transport errors, returned fields), should a server or proxy ever echo it.
 func scrub(msg, key string) string {
 	if key == "" {
 		return msg
