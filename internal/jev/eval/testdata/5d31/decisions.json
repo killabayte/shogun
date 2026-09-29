@@ -1,7 +1,0 @@
-[
- {
-  "question": "Should the usage line in cmd/shogun/main.go:97 (`shogun stats [--dir d]`) and the stats row in README.md:242 also mention `--json`?",
-  "answer": "Leave both unchanged, since the task does not ask for it. The edit is a one-line, reversible addition if wanted.",
-  "source": "assumption"
- }
-]

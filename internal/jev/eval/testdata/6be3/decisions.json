@@ -1,7 +1,0 @@
-[
- {
-  "question": "With --json and an empty runs directory, should stats print a JSON document with an empty runs list and zero totals, or keep today's behaviour (a 'no runs in …' note on stderr and nothing on stdout)?",
-  "answer": "Print the JSON document with an empty runs array and zero totals (no stderr note), so stdout always holds one JSON document; easy to switch.",
-  "source": "assumption"
- }
-]
