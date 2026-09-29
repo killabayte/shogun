@@ -46,6 +46,7 @@ func (a *app) cmdDoctor(args []string) int {
 	if loaded != nil {
 		cfg = loaded.Config
 	}
+	provider.StripFromChildren(cfg.StripEnv...) // before any model call, doctor --live included
 	ctx, cancel := context.WithTimeout(a.ctx, 20*time.Second)
 	defer cancel()
 

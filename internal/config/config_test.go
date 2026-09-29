@@ -161,15 +161,42 @@ func TestLegacyJevKeysAreIgnored(t *testing.T) {
 			t.Fatalf("legacy key %s has provenance", k)
 		}
 	}
+	// The legacy key *variable name* is kept as strip_env metadata, so the credential it named
+	// stays out of the models' processes; the name is written to new snapshots under strip_env.
+	if !reflect.DeepEqual(l.Config.StripEnv, []string{"JEV_DEFAULT_TEST"}) || l.Provenance["strip_env"] == "default" {
+		t.Fatalf("legacy key name not kept for stripping: %v (%v)", l.Config.StripEnv, l.Provenance["strip_env"])
+	}
 	var out strings.Builder
 	l.Describe(&out)
 	data, _ := l.Snapshot()
-	if strings.Contains(out.String(), "jev") || strings.Contains(string(data), "jev") {
-		t.Fatalf("legacy keys leaked into config output or snapshot:\n%s\n%s", out.String(), data)
+	if strings.Contains(out.String(), "jev ") || strings.Contains(out.String(), "jev_") || strings.Contains(string(data), "jev_") || !strings.Contains(string(data), "strip_env = ['JEV_DEFAULT_TEST']") {
+		t.Fatalf("config output or snapshot:\n%s\n%s", out.String(), data)
 	}
 	p := filepath.Join(t.TempDir(), "config.snapshot.toml")
-	os.WriteFile(p, []byte(string(data)+"jev = \"off\"\njev_api_key_env = \"TYPESAFE_API_KEY\"\njev_model = \"jev-1.13.0\"\njev_deny = []\n"), 0o600)
-	if back, err := LoadSnapshot(p); err != nil || back.Project != "demo" {
-		t.Fatalf("an old snapshot with jev keys must load: %v", err)
+	os.WriteFile(p, []byte("project = \"demo\"\njev = \"off\"\njev_api_key_env = \"MY_CLASSIFIER_CREDENTIAL\"\njev_model = \"jev-1.13.0\"\njev_deny = []\n"), 0o600)
+	back, err := LoadSnapshot(p)
+	if err != nil || back.Project != "demo" || !reflect.DeepEqual(back.StripEnv, []string{"MY_CLASSIFIER_CREDENTIAL"}) {
+		t.Fatalf("an old snapshot with jev keys must load and keep the key name: %v %+v", err, back)
+	}
+}
+
+// strip_env is a supported key: names are validated, deduplicated with the legacy one, and survive
+// the snapshot round trip.
+func TestStripEnvKey(t *testing.T) {
+	ws := t.TempDir()
+	mustWrite(t, filepath.Join(ws, ".shogun", "config.toml"), "strip_env = [\"MY_TOKEN\", \"OTHER\"]\njev_api_key_env = \"MY_TOKEN\"\n")
+	l, err := Load(ws, Overrides{}, env(map[string]string{"HOME": t.TempDir()}))
+	if err != nil || !reflect.DeepEqual(l.Config.StripEnv, []string{"MY_TOKEN", "OTHER"}) {
+		t.Fatalf("%v %v", err, l.Config.StripEnv)
+	}
+	data, _ := l.Snapshot()
+	p := filepath.Join(t.TempDir(), "config.snapshot.toml")
+	os.WriteFile(p, data, 0o600)
+	if back, err := LoadSnapshot(p); err != nil || !reflect.DeepEqual(*back, l.Config) {
+		t.Fatalf("round trip: %v\n%s", err, data)
+	}
+	mustWrite(t, filepath.Join(ws, ".shogun", "config.toml"), "strip_env = [\"NOT-A-NAME\"]\n")
+	if _, err := Load(ws, Overrides{}, env(map[string]string{"HOME": t.TempDir()})); err == nil {
+		t.Fatal("an invalid variable name must fail")
 	}
 }

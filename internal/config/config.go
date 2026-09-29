@@ -32,6 +32,10 @@ type Config struct {
 	MaxTime          time.Duration // 0 = derived
 	MaxContextTokens int           // heuristic threshold before integration
 
+	// StripEnv names environment variables that must never reach the models' child processes, on
+	// top of the built-in provider prefixes. The key variable of the closed Jev experiment (legacy
+	// jev_api_key_env) is folded in here, so an old configuration keeps its protection.
+	StripEnv []string
 }
 
 // Source tells where an effective value came from.
@@ -55,21 +59,23 @@ type Overrides struct {
 
 // fileConfig mirrors the TOML surface. Pointers distinguish "unset" from zero values.
 type fileConfig struct {
-	Planner          *string `toml:"planner"`
-	Reviewer         *string `toml:"reviewer"`
-	ClaudeCommand    *string `toml:"claude_command"`
-	CodexCommand     *string `toml:"codex_command"`
-	PlansDir         *string `toml:"plans_dir"`
-	Project          *string `toml:"project"`
-	Lang             *string `toml:"lang"`
-	ReviewRounds     *int    `toml:"review_rounds"`
-	DetailBatch      *int    `toml:"detail_batch"`
-	CallDeadline     *string `toml:"call_deadline"`
-	MaxCalls         *int    `toml:"max_calls"`
-	MaxTime          *string `toml:"max_time"`
-	MaxContextTokens *int    `toml:"max_context_tokens"`
-	// Keys of the closed Jev experiment (2026-09-29): still accepted, ignored, never written, so
-	// configs and run snapshots from that time keep loading under the strict decoder.
+	Planner          *string  `toml:"planner"`
+	Reviewer         *string  `toml:"reviewer"`
+	ClaudeCommand    *string  `toml:"claude_command"`
+	CodexCommand     *string  `toml:"codex_command"`
+	PlansDir         *string  `toml:"plans_dir"`
+	Project          *string  `toml:"project"`
+	Lang             *string  `toml:"lang"`
+	ReviewRounds     *int     `toml:"review_rounds"`
+	DetailBatch      *int     `toml:"detail_batch"`
+	CallDeadline     *string  `toml:"call_deadline"`
+	MaxCalls         *int     `toml:"max_calls"`
+	MaxTime          *string  `toml:"max_time"`
+	MaxContextTokens *int     `toml:"max_context_tokens"`
+	StripEnv         []string `toml:"strip_env"`
+	// Keys of the closed Jev experiment (2026-09-29): still accepted so configs and run snapshots
+	// from that time keep loading under the strict decoder. jev_api_key_env named a credential
+	// variable; its name is kept as strip_env metadata (never its value). The others are ignored.
 	LegacyJev       *string  `toml:"jev"`
 	LegacyJevKeyEnv *string  `toml:"jev_api_key_env"`
 	LegacyJevModel  *string  `toml:"jev_model"`
@@ -109,7 +115,7 @@ func WorkspacePath(workspace string) string {
 func Load(workspace string, ov Overrides, getenv func(string) string) (*Loaded, error) {
 	l := &Loaded{Config: Default(), Provenance: map[string]Source{}}
 	for _, k := range []string{"planner", "reviewer", "claude_command", "codex_command", "plans_dir", "project", "lang",
-		"review_rounds", "detail_batch", "call_deadline", "max_calls", "max_time", "max_context_tokens"} {
+		"review_rounds", "detail_batch", "call_deadline", "max_calls", "max_time", "max_context_tokens", "strip_env"} {
 		l.Provenance[k] = "default"
 	}
 	for _, p := range []string{GlobalPath(getenv), WorkspacePath(workspace)} {
@@ -219,7 +225,29 @@ func (l *Loaded) apply(fc *fileConfig, src Source, baseDir string, getenv func(s
 		l.Config.MaxContextTokens = *fc.MaxContextTokens
 		set("max_context_tokens")
 	}
+	if fc.StripEnv != nil {
+		l.Config.StripEnv = addNames(nil, fc.StripEnv...)
+		set("strip_env")
+	}
+	if fc.LegacyJevKeyEnv != nil && *fc.LegacyJevKeyEnv != "" {
+		l.Config.StripEnv = addNames(l.Config.StripEnv, *fc.LegacyJevKeyEnv)
+		set("strip_env")
+	}
 	return nil
+}
+
+// addNames appends names not already present; an empty result stays nil.
+func addNames(names []string, more ...string) []string {
+	for _, m := range more {
+		found := false
+		for _, n := range names {
+			found = found || n == m
+		}
+		if !found {
+			names = append(names, m)
+		}
+	}
+	return names
 }
 
 func (l *Loaded) applyOverrides(ov Overrides, getenv func(string) string) error {
@@ -323,10 +351,28 @@ func (c Config) Validate() error {
 	if c.Project != "" && !ValidProject(c.Project) {
 		errs = append(errs, fmt.Sprintf("project %q must be a single safe path segment", c.Project))
 	}
+	for _, n := range c.StripEnv {
+		if !validEnvName(n) {
+			errs = append(errs, fmt.Sprintf("strip_env entry %q is not an environment variable name", n))
+		}
+	}
 	if len(errs) > 0 {
 		return fmt.Errorf("invalid configuration:\n  - %s", strings.Join(errs, "\n  - "))
 	}
 	return nil
+}
+
+// validEnvName accepts [A-Za-z_][A-Za-z0-9_]*.
+func validEnvName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		if !(r == '_' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || i > 0 && r >= '0' && r <= '9') {
+			return false
+		}
+	}
+	return true
 }
 
 // ValidProject accepts one path segment of [A-Za-z0-9._-], not "." or "..".
@@ -345,19 +391,20 @@ func ValidProject(p string) bool {
 // snapshot is the on-disk TOML shape of an effective configuration (config.snapshot.toml).
 // It uses the same keys as fileConfig, so a snapshot can be re-read with readFile.
 type snapshot struct {
-	Planner          string `toml:"planner"`
-	Reviewer         string `toml:"reviewer"`
-	ClaudeCommand    string `toml:"claude_command"`
-	CodexCommand     string `toml:"codex_command"`
-	PlansDir         string `toml:"plans_dir"`
-	Project          string `toml:"project"`
-	Lang             string `toml:"lang"`
-	ReviewRounds     int    `toml:"review_rounds"`
-	DetailBatch      int    `toml:"detail_batch"`
-	CallDeadline     string `toml:"call_deadline"`
-	MaxCalls         int    `toml:"max_calls"`
-	MaxTime          string `toml:"max_time"`
-	MaxContextTokens int    `toml:"max_context_tokens"`
+	Planner          string   `toml:"planner"`
+	Reviewer         string   `toml:"reviewer"`
+	ClaudeCommand    string   `toml:"claude_command"`
+	CodexCommand     string   `toml:"codex_command"`
+	PlansDir         string   `toml:"plans_dir"`
+	Project          string   `toml:"project"`
+	Lang             string   `toml:"lang"`
+	ReviewRounds     int      `toml:"review_rounds"`
+	DetailBatch      int      `toml:"detail_batch"`
+	CallDeadline     string   `toml:"call_deadline"`
+	MaxCalls         int      `toml:"max_calls"`
+	MaxTime          string   `toml:"max_time"`
+	MaxContextTokens int      `toml:"max_context_tokens"`
+	StripEnv         []string `toml:"strip_env"`
 }
 
 // Snapshot renders the effective configuration as valid TOML with provenance in comments.
@@ -370,7 +417,7 @@ func (l *Loaded) Snapshot() ([]byte, error) {
 		PlansDir: c.PlansDir, Project: c.Project, Lang: c.Lang,
 		ReviewRounds: c.ReviewRounds, DetailBatch: c.DetailBatch,
 		CallDeadline: c.CallDeadline.String(), MaxCalls: c.MaxCalls, MaxTime: c.MaxTime.String(),
-		MaxContextTokens: c.MaxContextTokens,
+		MaxContextTokens: c.MaxContextTokens, StripEnv: c.StripEnv,
 	})
 	if err != nil {
 		return nil, err
@@ -419,7 +466,7 @@ func (l *Loaded) Describe(w io.Writer) {
 		"plans_dir": c.PlansDir, "project": c.Project, "lang": c.Lang,
 		"review_rounds": fmt.Sprint(c.ReviewRounds), "detail_batch": fmt.Sprint(c.DetailBatch),
 		"call_deadline": c.CallDeadline.String(), "max_calls": fmt.Sprint(c.MaxCalls), "max_time": c.MaxTime.String(),
-		"max_context_tokens": fmt.Sprint(c.MaxContextTokens),
+		"max_context_tokens": fmt.Sprint(c.MaxContextTokens), "strip_env": strings.Join(c.StripEnv, ", "),
 	}
 	keys := make([]string, 0, len(rows))
 	for k := range rows {

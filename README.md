@@ -264,6 +264,7 @@ over both.
 | `max_calls`, `max_time` | unset: 4 attempts and 10 min on the default path | the run's limits (physical attempts, active time) |
 | `call_deadline` | 30 min | one call's limit, always within the run's remaining time |
 | `max_context_tokens` | 400000 | estimated prompt size above which a call is not started (both modes) |
+| `strip_env` | `[]` | names of environment variables that must never reach the models' processes, on top of the built-in `ANTHROPIC_*`, `OPENAI_*`, `CLAUDE_CODE_*`, `TYPESAFE_*`, `JEV_*` |
 | `review_rounds`, `detail_batch` | 6, 1 | `--thorough` only |
 
 ## Development

@@ -50,6 +50,7 @@ func (a *app) runners(ctx context.Context, cfg config.Config) (provider.Runner, 
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	provider.StripFromChildren(cfg.StripEnv...) // configured names never reach a model
 	return &provider.Claude{Bin: claudePath}, &provider.Codex{Bin: codexPath}, map[string]string{"claude": claudeVer, "codex": codexVer}, nil
 }
 
