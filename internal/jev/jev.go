@@ -130,13 +130,15 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("jev %s: %s", e.Class, e.Msg)
 }
 
-// Client talks to one endpoint with one key and one pinned model.
+// Client talks to one endpoint with one key and one pinned model. Deny adds configured outbound
+// patterns (jev_deny) to the built-in guard; the guard itself cannot be turned off.
 type Client struct {
 	BaseURL string
 	Model   string
 	Key     string
 	Timeout time.Duration
 	HTTP    *http.Client
+	Deny    []Pattern
 }
 
 // New returns a client for the official endpoint with the pinned model.
@@ -155,6 +157,9 @@ func (c *Client) Ask(ctx context.Context, state any, questions map[string]Questi
 	stateJSON, err := json.Marshal(state)
 	if err != nil {
 		return nil, &Error{Class: ClassLimit, Msg: "state is not serializable: " + err.Error()}
+	}
+	if err := c.guard(state, questions); err != nil { // before anything else: nothing sensitive leaves
+		return nil, err
 	}
 	if err := checkLimits(stateJSON, questions); err != nil {
 		return nil, err

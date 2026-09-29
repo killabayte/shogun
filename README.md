@@ -264,7 +264,7 @@ over both.
 | `max_calls`, `max_time` | unset: 4 attempts and 10 min on the default path | the run's limits (physical attempts, active time) |
 | `call_deadline` | 30 min | one call's limit, always within the run's remaining time |
 | `max_context_tokens` | 400000 | estimated prompt size above which a call is not started (both modes) |
-| `jev`, `jev_api_key_env`, `jev_model` | `off`, `TYPESAFE_API_KEY`, `jev-1.13.0` | Jev, an advisory classifier (experimental; in this release it only reaches `doctor`): `advisory` reads the key from the named variable, `doctor --live` pings it once and records `.shogun/preflight/jev.json`; the variable is stripped from the models' processes |
+| `jev`, `jev_api_key_env`, `jev_model`, `jev_deny` | `off`, `TYPESAFE_API_KEY`, `jev-1.13.0`, `[]` | Jev, an advisory classifier (experimental; in this release it only reaches `doctor`): `advisory` reads the key from the named variable, `doctor --live` pings it once and records `.shogun/preflight/jev.json`; the variable is stripped from the models' processes. Every request passes an outbound guard that refuses states containing secrets, credentials, e-mail or IP addresses, account ids, home paths, or anything matching the `jev_deny` regexps (your internal domains and names) |
 | `review_rounds`, `detail_batch` | 6, 1 | `--thorough` only |
 
 ## Development

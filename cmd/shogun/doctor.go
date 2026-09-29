@@ -89,7 +89,8 @@ func (a *app) cmdDoctor(args []string) int {
 	case jevKey == "":
 		add("jev", false, fmt.Sprintf("advisory, but $%s is empty: export the key there, set jev_api_key_env, or jev = \"off\"", cfg.JevKeyEnv))
 	default:
-		add("jev", true, fmt.Sprintf("advisory; key from $%s (%s); model %s; the variable is stripped from child processes", cfg.JevKeyEnv, jev.Redact(jevKey), cfg.JevModel))
+		add("jev", true, fmt.Sprintf("advisory; key from $%s (%s); model %s; outbound guard: %d built-in pattern(s) + %d from jev_deny; the variable is stripped from child processes",
+			cfg.JevKeyEnv, jev.Redact(jevKey), cfg.JevModel, len(jev.BuiltinPatterns), len(cfg.JevDeny)))
 	}
 
 	allOK := true
@@ -171,7 +172,8 @@ func jevRecordStatus(path string) string {
 // jevLive makes one tiny request (a noul about the word "ping") and records the answer. The key
 // is never printed; a failure is a FAIL row with the API's class and message.
 func (a *app) jevLive(cfg config.Config, key string) bool {
-	c := &jev.Client{BaseURL: jevBaseURL, Model: cfg.JevModel, Key: key, Timeout: jev.DefaultTimeout}
+	deny, _ := jev.CompileDeny(cfg.JevDeny) // validated at config load
+	c := &jev.Client{BaseURL: jevBaseURL, Model: cfg.JevModel, Key: key, Timeout: jev.DefaultTimeout, Deny: deny}
 	res, err := c.Ask(a.ctx, map[string]string{"text": "ping"}, map[string]jev.Question{"is_ping": jev.Noul("Is `text` exactly the word ping?")})
 	if err != nil {
 		fmt.Fprintf(a.stdout, "FAIL %-16s %s\n", "jev live", err)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -248,3 +249,30 @@ func TestRunRecordsErrorsAndContinues(t *testing.T) {
 		t.Fatalf("json:\n%s", b)
 	}
 }
+
+// Every state of the evaluation set passes the outbound guard, and the dump names every item; a
+// state with an address in it would be refused. Set JEV_EVAL_DUMP to keep the dump for reading.
+func TestOutgoingStatesPassTheGuard(t *testing.T) {
+	var b strings.Builder
+	refused, err := Outgoing(&b, Cases, nil)
+	if err != nil || refused != 0 {
+		t.Fatalf("refused %d, err %v", refused, err)
+	}
+	if strings.Count(b.String(), "=== ") != 47 || strings.Contains(b.String(), "REFUSED") {
+		t.Fatalf("dump:\n%s", b.String()[:2000])
+	}
+	if p := os.Getenv("JEV_EVAL_DUMP"); p != "" {
+		if err := os.WriteFile(p, []byte(b.String()), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("outgoing states written to %s", p)
+	}
+	poisoned := []Case{{Name: "x", Label: "good", Dir: "5d31"}}
+	_, items, _ := Load(poisoned[0])
+	items[0].State.(map[string]any)["task"] = "mail me at someone@example.com"
+	if ms := jev.Scan(string(mustJSON(items[0].State)), nil); len(ms) != 1 || ms[0].Name != "email" {
+		t.Fatalf("poisoned state not caught: %v", ms)
+	}
+}
+
+func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }

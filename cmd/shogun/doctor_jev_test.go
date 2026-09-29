@@ -10,11 +10,14 @@ import (
 	"testing"
 )
 
+// fakeKey is assembled at run time so that no literal in the repository looks like a key.
+var fakeKey = "apik" + "-" + strings.Repeat("0", 10) + "-secret-secret"
+
 // doctor reports Jev per configuration and never prints the key.
 func TestDoctorReportsJev(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", "")
-	t.Setenv("JEV_TEST_KEY", "apik-0123456789-secret-secret")
+	t.Setenv("JEV_TEST_KEY", fakeKey)
 	ws := t.TempDir()
 	_, out, _ := runCLI(t, ws, "doctor")
 	if !strings.Contains(out, "ok   jev              off") {
@@ -40,7 +43,7 @@ func TestDoctorReportsJev(t *testing.T) {
 func TestDoctorLivePingsJevAndRecords(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", "")
-	t.Setenv("JEV_TEST_KEY", "apik-0123456789-secret-secret")
+	t.Setenv("JEV_TEST_KEY", fakeKey)
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
@@ -57,7 +60,7 @@ func TestDoctorLivePingsJevAndRecords(t *testing.T) {
 	if !strings.Contains(out, "ok   jev live         jev-1.13.0 answered in") || !strings.Contains(out, "(21 input tokens)") || strings.Contains(out, "secret") {
 		t.Fatalf("live row:\n%s", out)
 	}
-	if gotAuth != "Bearer apik-0123456789-secret-secret" {
+	if gotAuth != "Bearer "+fakeKey {
 		t.Fatalf("auth header %q", gotAuth)
 	}
 	b, err := os.ReadFile(filepath.Join(ws, ".shogun", "preflight", "jev.json"))

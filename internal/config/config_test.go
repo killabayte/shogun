@@ -4,6 +4,7 @@ import (
 	"github.com/killabayte/shogun/internal/jev"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -128,7 +129,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("snapshot must be loadable TOML: %v\n%s", err, data)
 	}
-	if *back != l.Config {
+	if !reflect.DeepEqual(*back, l.Config) {
 		t.Fatalf("round-trip mismatch:\n got %+v\nwant %+v", *back, l.Config)
 	}
 	if !strings.Contains(string(data), "# provenance: max_calls = flag") {
@@ -167,13 +168,17 @@ func TestJevConfigKeys(t *testing.T) {
 	data, _ := l.Snapshot()
 	p := filepath.Join(t.TempDir(), "config.snapshot.toml")
 	os.WriteFile(p, data, 0o600)
-	if back, err := LoadSnapshot(p); err != nil || *back != l.Config {
+	if back, err := LoadSnapshot(p); err != nil || !reflect.DeepEqual(*back, l.Config) {
 		t.Fatalf("round trip: %v\n%s", err, data)
 	}
 	if strings.Contains(string(data), "apik") {
 		t.Fatal("a key value reached the snapshot")
 	}
-	for _, bad := range []string{"jev = \"on\"\n", "jev = \"auto\"\n", "jev_api_key_env = \"JEV-DEFAULT-TEST\"\n", "jev_model = \"\"\n"} {
+	mustWrite(t, filepath.Join(ws, ".shogun", "config.toml"), "jev_deny = [\"(?i)openvpn\\\\.in\", \"cipherscale\"]\n")
+	if l, err := Load(ws, Overrides{}, env(map[string]string{"HOME": t.TempDir()})); err != nil || len(l.Config.JevDeny) != 2 || l.Provenance["jev_deny"] == "default" {
+		t.Fatalf("jev_deny: %v", err)
+	}
+	for _, bad := range []string{"jev = \"on\"\n", "jev = \"auto\"\n", "jev_api_key_env = \"JEV-DEFAULT-TEST\"\n", "jev_model = \"\"\n", "jev_deny = [\"(\"]\n"} {
 		mustWrite(t, filepath.Join(ws, ".shogun", "config.toml"), bad)
 		if _, err := Load(ws, Overrides{}, env(map[string]string{"HOME": t.TempDir()})); err == nil {
 			t.Fatalf("%q must fail", bad)

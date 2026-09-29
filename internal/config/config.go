@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"github.com/killabayte/shogun/internal/jev"
 	"io"
 	"os"
 	"path/filepath"
@@ -34,9 +35,10 @@ type Config struct {
 
 	// Jev (docs/plans/shogun-jev.md): an advisory classifier, off by default. JevKeyEnv names the
 	// environment variable that holds the key; the key itself is never a config value.
-	Jev       string // "off" | "advisory"
-	JevKeyEnv string // default TYPESAFE_API_KEY
-	JevModel  string // pinned model id; aliases move on their own
+	Jev       string   // "off" | "advisory"
+	JevKeyEnv string   // default TYPESAFE_API_KEY
+	JevModel  string   // pinned model id; aliases move on their own
+	JevDeny   []string // extra outbound patterns (regexps) on top of the built-in guard
 }
 
 // Jev modes and defaults (kept in sync with internal/jev by a test).
@@ -68,22 +70,23 @@ type Overrides struct {
 
 // fileConfig mirrors the TOML surface. Pointers distinguish "unset" from zero values.
 type fileConfig struct {
-	Planner          *string `toml:"planner"`
-	Reviewer         *string `toml:"reviewer"`
-	ClaudeCommand    *string `toml:"claude_command"`
-	CodexCommand     *string `toml:"codex_command"`
-	PlansDir         *string `toml:"plans_dir"`
-	Project          *string `toml:"project"`
-	Lang             *string `toml:"lang"`
-	ReviewRounds     *int    `toml:"review_rounds"`
-	DetailBatch      *int    `toml:"detail_batch"`
-	CallDeadline     *string `toml:"call_deadline"`
-	MaxCalls         *int    `toml:"max_calls"`
-	MaxTime          *string `toml:"max_time"`
-	MaxContextTokens *int    `toml:"max_context_tokens"`
-	Jev              *string `toml:"jev"`
-	JevAPIKeyEnv     *string `toml:"jev_api_key_env"`
-	JevModel         *string `toml:"jev_model"`
+	Planner          *string  `toml:"planner"`
+	Reviewer         *string  `toml:"reviewer"`
+	ClaudeCommand    *string  `toml:"claude_command"`
+	CodexCommand     *string  `toml:"codex_command"`
+	PlansDir         *string  `toml:"plans_dir"`
+	Project          *string  `toml:"project"`
+	Lang             *string  `toml:"lang"`
+	ReviewRounds     *int     `toml:"review_rounds"`
+	DetailBatch      *int     `toml:"detail_batch"`
+	CallDeadline     *string  `toml:"call_deadline"`
+	MaxCalls         *int     `toml:"max_calls"`
+	MaxTime          *string  `toml:"max_time"`
+	MaxContextTokens *int     `toml:"max_context_tokens"`
+	Jev              *string  `toml:"jev"`
+	JevAPIKeyEnv     *string  `toml:"jev_api_key_env"`
+	JevModel         *string  `toml:"jev_model"`
+	JevDeny          []string `toml:"jev_deny"`
 }
 
 // Default returns the built-in defaults.
@@ -120,7 +123,7 @@ func WorkspacePath(workspace string) string {
 func Load(workspace string, ov Overrides, getenv func(string) string) (*Loaded, error) {
 	l := &Loaded{Config: Default(), Provenance: map[string]Source{}}
 	for _, k := range []string{"planner", "reviewer", "claude_command", "codex_command", "plans_dir", "project", "lang",
-		"review_rounds", "detail_batch", "call_deadline", "max_calls", "max_time", "max_context_tokens", "jev", "jev_api_key_env", "jev_model"} {
+		"review_rounds", "detail_batch", "call_deadline", "max_calls", "max_time", "max_context_tokens", "jev", "jev_api_key_env", "jev_model", "jev_deny"} {
 		l.Provenance[k] = "default"
 	}
 	for _, p := range []string{GlobalPath(getenv), WorkspacePath(workspace)} {
@@ -242,6 +245,13 @@ func (l *Loaded) apply(fc *fileConfig, src Source, baseDir string, getenv func(s
 		l.Config.JevModel = *fc.JevModel
 		set("jev_model")
 	}
+	if fc.JevDeny != nil {
+		l.Config.JevDeny = nil // an empty list reads back as nil, like the default
+		if len(fc.JevDeny) > 0 {
+			l.Config.JevDeny = append([]string{}, fc.JevDeny...)
+		}
+		set("jev_deny")
+	}
 	return nil
 }
 
@@ -355,6 +365,9 @@ func (c Config) Validate() error {
 	if c.JevModel == "" {
 		errs = append(errs, "jev_model must not be empty")
 	}
+	if _, err := jev.CompileDeny(c.JevDeny); err != nil {
+		errs = append(errs, err.Error())
+	}
 	if len(errs) > 0 {
 		return fmt.Errorf("invalid configuration:\n  - %s", strings.Join(errs, "\n  - "))
 	}
@@ -390,22 +403,23 @@ func ValidProject(p string) bool {
 // snapshot is the on-disk TOML shape of an effective configuration (config.snapshot.toml).
 // It uses the same keys as fileConfig, so a snapshot can be re-read with readFile.
 type snapshot struct {
-	Planner          string `toml:"planner"`
-	Reviewer         string `toml:"reviewer"`
-	ClaudeCommand    string `toml:"claude_command"`
-	CodexCommand     string `toml:"codex_command"`
-	PlansDir         string `toml:"plans_dir"`
-	Project          string `toml:"project"`
-	Lang             string `toml:"lang"`
-	ReviewRounds     int    `toml:"review_rounds"`
-	DetailBatch      int    `toml:"detail_batch"`
-	CallDeadline     string `toml:"call_deadline"`
-	MaxCalls         int    `toml:"max_calls"`
-	MaxTime          string `toml:"max_time"`
-	MaxContextTokens int    `toml:"max_context_tokens"`
-	Jev              string `toml:"jev"`
-	JevAPIKeyEnv     string `toml:"jev_api_key_env"`
-	JevModel         string `toml:"jev_model"`
+	Planner          string   `toml:"planner"`
+	Reviewer         string   `toml:"reviewer"`
+	ClaudeCommand    string   `toml:"claude_command"`
+	CodexCommand     string   `toml:"codex_command"`
+	PlansDir         string   `toml:"plans_dir"`
+	Project          string   `toml:"project"`
+	Lang             string   `toml:"lang"`
+	ReviewRounds     int      `toml:"review_rounds"`
+	DetailBatch      int      `toml:"detail_batch"`
+	CallDeadline     string   `toml:"call_deadline"`
+	MaxCalls         int      `toml:"max_calls"`
+	MaxTime          string   `toml:"max_time"`
+	MaxContextTokens int      `toml:"max_context_tokens"`
+	Jev              string   `toml:"jev"`
+	JevAPIKeyEnv     string   `toml:"jev_api_key_env"`
+	JevModel         string   `toml:"jev_model"`
+	JevDeny          []string `toml:"jev_deny"`
 }
 
 // Snapshot renders the effective configuration as valid TOML with provenance in comments.
@@ -419,7 +433,7 @@ func (l *Loaded) Snapshot() ([]byte, error) {
 		ReviewRounds: c.ReviewRounds, DetailBatch: c.DetailBatch,
 		CallDeadline: c.CallDeadline.String(), MaxCalls: c.MaxCalls, MaxTime: c.MaxTime.String(),
 		MaxContextTokens: c.MaxContextTokens,
-		Jev:              c.Jev, JevAPIKeyEnv: c.JevKeyEnv, JevModel: c.JevModel,
+		Jev:              c.Jev, JevAPIKeyEnv: c.JevKeyEnv, JevModel: c.JevModel, JevDeny: c.JevDeny,
 	})
 	if err != nil {
 		return nil, err
@@ -469,7 +483,7 @@ func (l *Loaded) Describe(w io.Writer) {
 		"review_rounds": fmt.Sprint(c.ReviewRounds), "detail_batch": fmt.Sprint(c.DetailBatch),
 		"call_deadline": c.CallDeadline.String(), "max_calls": fmt.Sprint(c.MaxCalls), "max_time": c.MaxTime.String(),
 		"max_context_tokens": fmt.Sprint(c.MaxContextTokens),
-		"jev":                c.Jev, "jev_api_key_env": c.JevKeyEnv, "jev_model": c.JevModel,
+		"jev":                c.Jev, "jev_api_key_env": c.JevKeyEnv, "jev_model": c.JevModel, "jev_deny": strings.Join(c.JevDeny, ", "),
 	}
 	keys := make([]string, 0, len(rows))
 	for k := range rows {
