@@ -1,0 +1,103 @@
+{
+ "requirements": [
+  {
+   "id": "R-001",
+   "statement": "При запуске с флагом --version программа печатает свою версию в stdout и завершает работу с кодом 0, не выполняя обычную логику (приветствие).",
+   "source_ids": [
+    "task",
+    "repo-1"
+   ],
+   "type": "functional",
+   "mandatory": true,
+   "criteria": [
+    {
+     "id": "R-001.C1",
+     "text": "`go run . --version` выводит строку версии (при принятом допущении — `0.1.0`) и завершается с кодом 0."
+    },
+    {
+     "id": "R-001.C2",
+     "text": "Вывод `go run . --version` не содержит строки `hello, `."
+    }
+   ]
+  },
+  {
+   "id": "R-002",
+   "statement": "Поведение без флага --version не меняется.",
+   "source_ids": [
+    "repo-1"
+   ],
+   "type": "constraint",
+   "mandatory": true,
+   "criteria": [
+    {
+     "id": "R-002.C1",
+     "text": "`go run .` выводит `hello, world`, а `go run . -name Bob` выводит `hello, Bob`."
+    },
+    {
+     "id": "R-002.C2",
+     "text": "`go build ./...` и `go vet ./...` завершаются без ошибок."
+    }
+   ]
+  }
+ ],
+ "steps": [
+  {
+   "id": "S-001",
+   "title": "Добавить флаг --version в main.go",
+   "objective": "Программа печатает версию и завершается при --version, остальное поведение неизменно.",
+   "requirement_ids": [
+    "R-001",
+    "R-002"
+   ],
+   "criterion_ids": [
+    "R-001.C1",
+    "R-001.C2",
+    "R-002.C1",
+    "R-002.C2"
+   ],
+   "depends_on": [],
+   "targets": [
+    {
+     "repo_id": "repo-1",
+     "path": "main.go",
+     "operation": "modify"
+    }
+   ],
+   "actions": [
+    "В main.go перед func main() добавить `const version = \"0.1.0\"`.",
+    "В main() рядом с объявлением флага name добавить `showVersion := flag.Bool(\"version\", false, \"print version and exit\")`.",
+    "Сразу после flag.Parse() добавить: если *showVersion — `fmt.Println(version)` и `return`; строку с приветствием оставить без изменений.",
+    "Выполнить gofmt для main.go."
+   ],
+   "verification": [
+    {
+     "id": "V-001",
+     "repo_id": "repo-1",
+     "method": "command",
+     "expected": "`go run . --version; echo $?` выводит `0.1.0` и `0` (R-001.C1)."
+    },
+    {
+     "id": "V-002",
+     "repo_id": "repo-1",
+     "method": "command",
+     "expected": "В выводе `go run . --version` нет строки `hello, ` (R-001.C2)."
+    },
+    {
+     "id": "V-003",
+     "repo_id": "repo-1",
+     "method": "command",
+     "expected": "`go run .` выводит `hello, world`; `go run . -name Bob` выводит `hello, Bob` (R-002.C1)."
+    },
+    {
+     "id": "V-004",
+     "repo_id": "repo-1",
+     "method": "command",
+     "expected": "`go build ./...` и `go vet ./...` завершаются с кодом 0 без сообщений; `gofmt -l .` ничего не выводит (R-002.C2)."
+    }
+   ],
+   "risks": [],
+   "rollback_or_why_not_applicable": "Изменение одного файла: откатить через `git checkout -- main.go`."
+  }
+ ],
+ "questions": []
+}

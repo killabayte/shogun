@@ -1,0 +1,231 @@
+{
+ "requirements": [
+  {
+   "id": "R-001",
+   "statement": "`shogun stats --json` prints exactly one JSON document on stdout instead of the table and the totals text.",
+   "source_ids": [
+    "task"
+   ],
+   "type": "functional",
+   "mandatory": true,
+   "criteria": [
+    {
+     "id": "R-001.C1",
+     "text": "With --json, all of stdout parses as a single JSON object with the keys `runs` and `totals`. stdout contains no table header ('RUN') and no 'total:' line."
+    }
+   ]
+  },
+  {
+   "id": "R-002",
+   "statement": "The JSON has one object per run, sorted by id like the table. Each object has id, status, mode, planner, reviewer, attempts, active_seconds, input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens, cost_usd and usage. A damaged run has status \"damaged\" and its reason in `damaged`.",
+   "source_ids": [
+    "task",
+    "repo-1"
+   ],
+   "type": "functional",
+   "mandatory": true,
+   "criteria": [
+    {
+     "id": "R-002.C1",
+     "text": "For the test fixture, `runs` has 5 entries in id order. Run 20260927-000001-a has status approved, mode fast, planner claude/opus:high, reviewer codex/gpt-6-astra:high, attempts 2, active_seconds 150, input_tokens 100, cache_read_tokens 1000, cache_write_tokens 0, output_tokens 50, reasoning_tokens 20, cost_usd 0.5 and usage ok. Run 20260927-000002-b has usage unknown."
+    },
+    {
+     "id": "R-002.C2",
+     "text": "The damaged run 20260927-000003-c has status \"damaged\" and a non-empty `damaged` reason. Runs that are not damaged have no `damaged` key."
+    }
+   ]
+  },
+  {
+   "id": "R-003",
+   "statement": "The JSON totals hold the run count, runs by status, the damaged count, the summed attempts, active seconds, token sums and cost, and whether the attempts/time and the tokens/cost are lower bounds. The totals follow the same rules as the text totals.",
+   "source_ids": [
+    "task",
+    "repo-1"
+   ],
+   "type": "functional",
+   "mandatory": true,
+   "criteria": [
+    {
+     "id": "R-003.C1",
+     "text": "For the fixture, `totals` has runs 5, by_status {approved:1, failed:1, needs_input:1, paused:1}, damaged 1, attempts 6, active_seconds 750, input_tokens 100, cache_read_tokens 1000, cache_write_tokens 0, output_tokens 50, reasoning_tokens 20 and cost_usd 0.5. spend_lower_bound and usage_lower_bound are both true."
+    }
+   ]
+  },
+  {
+   "id": "R-004",
+   "statement": "Without --json the stats output stays exactly as it is now.",
+   "source_ids": [
+    "task"
+   ],
+   "type": "constraint",
+   "mandatory": true,
+   "criteria": [
+    {
+     "id": "R-004.C1",
+     "text": "The existing assertions in TestStatsCountsEveryRunAndFlagsMissingUsage on the plain `stats` output pass unchanged. The diff leaves the table/totals printing code in cmdStats (stats.go:65-116) untouched."
+    }
+   ]
+  },
+  {
+   "id": "R-005",
+   "statement": "stats stays read-only with --json.",
+   "source_ids": [
+    "task"
+   ],
+   "type": "constraint",
+   "mandatory": true,
+   "criteria": [
+    {
+     "id": "R-005.C1",
+     "text": "After `stats --json`, the fixture's state.json of 20260927-000001-a is byte-identical to its content before the run."
+    }
+   ]
+  }
+ ],
+ "steps": [
+  {
+   "id": "S-001",
+   "title": "Add --json output to shogun stats",
+   "objective": "`shogun stats --json` prints the runs and totals as one JSON document, and the plain output is unchanged.",
+   "requirement_ids": [
+    "R-001",
+    "R-002",
+    "R-003",
+    "R-004"
+   ],
+   "criterion_ids": [
+    "R-001.C1",
+    "R-002.C1",
+    "R-002.C2",
+    "R-003.C1",
+    "R-004.C1"
+   ],
+   "depends_on": [],
+   "targets": [
+    {
+     "repo_id": "repo-1",
+     "path": "cmd/shogun/stats.go",
+     "operation": "modify"
+    },
+    {
+     "repo_id": "repo-1",
+     "path": "cmd/shogun/main.go",
+     "operation": "modify"
+    },
+    {
+     "repo_id": "repo-1",
+     "path": "README.md",
+     "operation": "modify"
+    }
+   ],
+   "actions": [
+    "In cmdStats (stats.go:40-41), add `asJSON := fs.Bool(\"json\", false, \"print the runs and totals as one JSON document\")` next to the --dir flag.",
+    "Add the JSON types in stats.go. statsRunJSON has ID `id`, Status `status` and Damaged `damaged,omitempty`, plus an embedded pointer *statsUsageJSON that is nil for damaged runs, so its fields are omitted there. statsUsageJSON has Mode `mode`, Planner `planner`, Reviewer `reviewer`, Attempts int `attempts`, ActiveSeconds float64 `active_seconds`, InputTokens/CacheReadTokens/CacheWriteTokens/OutputTokens/ReasoningTokens int64 (`input_tokens`, `cache_read_tokens`, `cache_write_tokens`, `output_tokens`, `reasoning_tokens`, all without omitempty), CostUSD float64 `cost_usd` and Usage `usage`. statsTotalsJSON has Runs int `runs`, ByStatus map[string]int `by_status`, Damaged int `damaged`, the same attempts/active_seconds/token/cost fields, SpendLowerBound bool `spend_lower_bound` and UsageLowerBound bool `usage_lower_bound`. The top-level document is {Runs []statsRunJSON `runs`; Totals statsTotalsJSON `totals`}.",
+    "Add `func (a *app) printStatsJSON(runs []runStats) int`. It loops over runs in their sorted order. For a damaged run (st == nil), it appends {id, status \"damaged\", damaged reason} and counts it. Otherwise it appends the usage object from r.mode, r.planner, r.reviewer (raw, no dash), st.Counters and r.usage(), increments ByStatus[string(st.Status)], and adds the counters to the totals the same way as stats.go:83-90. It sets SpendLowerBound = damaged > 0 and UsageLowerBound = (any run's usage != \"ok\") || damaged > 0. It initialises Runs as an empty slice and ByStatus as an empty map so they encode as [] and {}. It prints with `data, _ := json.MarshalIndent(doc, \"\", \" \")` and `fmt.Fprintln(a.stdout, string(data))`, then returns ExitOK. Add \"encoding/json\" to the imports.",
+    "In cmdStats, if *asJSON, call a.printStatsJSON(runs) right after the sort at stats.go:59 and before the `len(runs) == 0` check. An empty run set then still prints a document (runs [] and zero totals) and nothing goes to stderr (assumption in Q-002). Do not change the lines from stats.go:60 onwards.",
+    "Update the usage line in main.go:87 to `shogun stats [--dir d] [--json]` and keep the column alignment. Add `--json` next to `--dir` in the README.md:237 stats row (e.g. '`--dir`, `--json` prints the same as one JSON document')."
+   ],
+   "verification": [
+    {
+     "id": "V-001",
+     "repo_id": "repo-1",
+     "method": "command",
+     "expected": "`go build ./... && go vet ./cmd/shogun` succeed."
+    },
+    {
+     "id": "V-002",
+     "repo_id": "repo-1",
+     "method": "inspect",
+     "expected": "`git diff cmd/shogun/stats.go` shows no changed or removed lines in the table/totals printing block (the original lines 60-116). Only the flag, the JSON branch, the new types/function and the import are added."
+    }
+   ],
+   "risks": [
+    {
+     "risk": "The embedded nil pointer might not omit the usage fields for damaged runs as intended.",
+     "mitigation": "encoding/json skips nil embedded struct pointers. The S-002 test asserts that the damaged run has no `attempts` key, so a wrong encoding would fail it."
+    }
+   ],
+   "rollback_or_why_not_applicable": "Revert the commit that touches stats.go, main.go and README.md. Nothing is persisted or migrated."
+  },
+  {
+   "id": "S-002",
+   "title": "Test stats --json on the existing fixture",
+   "objective": "Prove the JSON content and read-only behaviour, and keep the plain-output assertions.",
+   "requirement_ids": [
+    "R-001",
+    "R-002",
+    "R-003",
+    "R-004",
+    "R-005"
+   ],
+   "criterion_ids": [
+    "R-001.C1",
+    "R-002.C1",
+    "R-002.C2",
+    "R-003.C1",
+    "R-004.C1",
+    "R-005.C1"
+   ],
+   "depends_on": [
+    "S-001"
+   ],
+   "targets": [
+    {
+     "repo_id": "repo-1",
+     "path": "cmd/shogun/stats_test.go",
+     "operation": "modify"
+    }
+   ],
+   "actions": [
+    "In TestStatsCountsEveryRunAndFlagsMissingUsage, keep every existing assertion unchanged. After the existing read-only check, run `runCLI(t, ws, \"stats\", \"--json\")` and require ExitOK.",
+    "Assert that stdout does not contain \"RUN\" or \"total:\". Unmarshal the whole stdout into a document struct with `runs` as []map[string]any and `totals` as map[string]any (or typed structs), and fail if unmarshalling fails.",
+    "Assert R-002.C1: 5 runs in id order, the listed field values for 20260927-000001-a, and usage \"unknown\" for 20260927-000002-b. Assert R-002.C2: 20260927-000003-c has status \"damaged\", a non-empty `damaged` and no `attempts` key, and 20260927-000001-a has no `damaged` key.",
+    "Assert the R-003.C1 totals values, including by_status without damaged and both lower-bound flags true.",
+    "Re-read 20260927-000001-a/state.json and compare it with `before` again to check that --json did not write to the run."
+   ],
+   "verification": [
+    {
+     "id": "V-003",
+     "repo_id": "repo-1",
+     "method": "test",
+     "expected": "`go test ./cmd/shogun -run TestStats -v` passes. It covers R-001.C1, R-002.C1, R-002.C2, R-003.C1 and R-005.C1, and the unchanged plain-output assertions cover R-004.C1."
+    },
+    {
+     "id": "V-004",
+     "repo_id": "repo-1",
+     "method": "test",
+     "expected": "`go test ./...` passes."
+    }
+   ],
+   "risks": [],
+   "rollback_or_why_not_applicable": "Revert the test change together with S-001."
+  }
+ ],
+ "questions": [
+  {
+   "id": "Q-001",
+   "question": "Are these JSON key names and this shape acceptable? The shape is {runs:[{id,status,mode,planner,reviewer,attempts,active_seconds,input_tokens,cache_read_tokens,cache_write_tokens,output_tokens,reasoning_tokens,cost_usd,usage,damaged?}], totals:{runs,by_status,damaged,attempts,active_seconds,input_tokens,cache_read_tokens,cache_write_tokens,output_tokens,reasoning_tokens,cost_usd,spend_lower_bound,usage_lower_bound}}.",
+   "why": "The key names become a public machine interface that scripts will rely on.",
+   "impact": "Renaming keys later breaks consumers. Choosing now only changes the struct tags and test assertions.",
+   "options": [
+    "Use the proposed snake_case names, which match state.json",
+    "Use a single `lower_bound` flag for all totals",
+    "Other names you prefer"
+   ],
+   "proposed_assumption": "Use the proposed names with two lower-bound flags. The text output already distinguishes attempts/time (lower bound only when runs are damaged) from tokens/cost (also when usage is missing).",
+   "blocking": false
+  },
+  {
+   "id": "Q-002",
+   "question": "With --json and no runs in the directory, should stats print an empty document (runs [] and zero totals) or keep today's behaviour (a note on stderr and nothing on stdout)?",
+   "why": "The task does not cover the empty case. A JSON consumer usually expects a document every time.",
+   "impact": "This decides whether the JSON branch runs before or after the `len(runs) == 0` early return.",
+   "options": [
+    "Print an empty document on stdout",
+    "Keep today's stderr note with empty stdout"
+   ],
+   "proposed_assumption": "Print an empty document on stdout and no stderr note. Moving the JSON call below the early return would switch to the other option.",
+   "blocking": false
+  }
+ ]
+}

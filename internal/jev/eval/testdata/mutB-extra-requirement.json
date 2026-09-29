@@ -1,0 +1,15 @@
+{
+ "kind": "requirement",
+ "item": {
+  "id": "R-006",
+  "statement": "Every invocation of `shogun stats` is appended as one line to `.shogun/stats.log` with the time and the flags used.",
+  "type": "functional",
+  "mandatory": true,
+  "criteria": [
+   {
+    "id": "R-006.C1",
+    "text": "After `shogun stats --json`, `.shogun/stats.log` has one more line naming the flag and the time."
+   }
+  ]
+ }
+}
