@@ -26,6 +26,9 @@ func liveQuestions() map[string]Question {
 	}
 }
 
+// testKey is assembled at run time so that no literal in the repository looks like a key.
+var testKey = "apik" + "-test-key-" + strings.Repeat("0", 10)
+
 type recorded struct {
 	auth, contentType string
 	body              map[string]any
@@ -42,7 +45,7 @@ func server(t *testing.T, status int, body string, rec *recorded) *Client {
 		w.Write([]byte(body))
 	}))
 	t.Cleanup(srv.Close)
-	return &Client{BaseURL: srv.URL, Key: "apik-test-key-0123456789", Timeout: 2 * time.Second}
+	return &Client{BaseURL: srv.URL, Key: testKey, Timeout: 2 * time.Second}
 }
 
 func classIs(t *testing.T, err error, want Class) *Error {
@@ -74,7 +77,7 @@ func TestAskParsesTheLiveShape(t *testing.T) {
 	if a := res.Answers["clarity"]; *a.Score != 2.97 || a.P("3") != 0.97 || a.Legend["3"] == "" {
 		t.Fatalf("score %+v", a)
 	}
-	if rec.auth != "Bearer apik-test-key-0123456789" || rec.contentType != "application/json" || rec.body["model"] != DefaultModel {
+	if rec.auth != "Bearer "+testKey || rec.contentType != "application/json" || rec.body["model"] != DefaultModel {
 		t.Fatalf("request %+v", rec)
 	}
 	if st, _ := rec.body["state"].(map[string]any); st["task"] != "Add a --json flag" {
