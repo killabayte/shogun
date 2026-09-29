@@ -22,8 +22,8 @@ func TestPR17ReviewOutgoingContainsChoiceCriteria(t *testing.T) {
 		if it.ID != "R-001" {
 			continue
 		}
-		opts := it.Questions["origin"].Criteria.(map[string]string)
-		key := "task_necessary_consequence"
+		opts := it.Questions["asked_by"].Criteria.(map[string]string) // v4 name of the v3 "origin" question
+		key := "needed_for_task"
 		if !strings.Contains(out.String(), key) || !strings.Contains(out.String(), opts[key]) {
 			t.Fatal("the outgoing audit omits option names/descriptions that the request sends")
 		}

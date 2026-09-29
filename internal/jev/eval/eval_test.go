@@ -15,10 +15,11 @@ import (
 	"github.com/killabayte/shogun/internal/jev"
 )
 
-// The §7 schedule: 47 requests over 9 cases, every state within the limits, every item's questions
-// within one request.
+// The §7 schedule (v4): 55 requests over 9 cases — the 47 items of v3 plus one extra request for
+// every step carrying more than four criteria — every state within the limits, every request
+// within the eight-question rule.
 func TestEvaluationSetMatchesTheDesign(t *testing.T) {
-	want := map[string]int{"5d31": 8, "1b4e": 8, "6be3": 8, "a592r1": 9, "08fdr1": 7, "102433": 4, "mutA": 1, "mutB": 1, "mutC": 1}
+	want := map[string]int{"5d31": 9, "1b4e": 9, "6be3": 9, "a592r1": 11, "08fdr1": 9, "102433": 4, "mutA": 1, "mutB": 1, "mutC": 2}
 	total := 0
 	for _, c := range Cases {
 		_, items, err := Load(c)
@@ -48,23 +49,22 @@ func TestEvaluationSetMatchesTheDesign(t *testing.T) {
 		}
 		for _, e := range c.Expect {
 			for _, s := range e.Any {
-				found := false
+				found := false // the question may live in the step's own request or in a #crit request
 				for _, it := range items {
-					if it.ID == s.Item {
-						found = true
-						if _, ok := it.Questions[s.Question]; !ok {
-							t.Errorf("%s: expectation on unknown question %s/%s", c.Name, s.Item, s.Question)
+					if it.ID == s.Item || strings.HasPrefix(it.ID, s.Item+"#") {
+						if _, ok := it.Questions[s.Question]; ok {
+							found = true
 						}
 					}
 				}
 				if !found {
-					t.Errorf("%s: expectation on unknown item %s", c.Name, s.Item)
+					t.Errorf("%s: expectation on unknown item/question %s/%s", c.Name, s.Item, s.Question)
 				}
 			}
 		}
 	}
-	if total != 47 {
-		t.Fatalf("%d requests in total, want 47", total)
+	if total != 55 {
+		t.Fatalf("%d requests in total, want 55", total)
 	}
 	defects := 0
 	for _, c := range Cases {
@@ -94,8 +94,15 @@ func TestItemsCarryTheirEvidence(t *testing.T) {
 		t.Fatalf("S-002 criteria %v", crit)
 	}
 	r1 := byID["R-001"].State.(map[string]any)
-	if all := r1["all_requirements"].([]string); len(all) != 5 || !strings.HasPrefix(all[4], "R-005: ") {
-		t.Fatalf("all_requirements %v", all)
+	if others := r1["other_requirements"].([]string); len(others) != 4 || strings.HasPrefix(others[0], "R-001") || !strings.HasPrefix(others[3], "R-005: ") {
+		t.Fatalf("other_requirements %v", others)
+	}
+	// S-002 carries 8 criteria: 4 ride with the step's questions, the rest in one extra request.
+	if q := byID["S-002"].Questions; len(q) != 8 || q["bites_R_001_C1"].Type != "noul" {
+		t.Fatalf("S-002 questions %d", len(q))
+	}
+	if q := byID["S-002#crit1"].Questions; len(q) != 4 || q["bites_R_005_C1"].Type != "noul" {
+		t.Fatalf("S-002#crit1 questions %d", len(q))
 	}
 	if a, ok := byID["A-001"]; !ok || a.Kind != "assumption" || byID["A-002"].ID != "" {
 		t.Fatalf("assumptions: %v", SortedIDs(items))
@@ -134,7 +141,7 @@ func fake(t *testing.T, adverseItems map[string]bool, delay time.Duration) (*jev
 			switch q.Type {
 			case "noul":
 				p := 0.05
-				if name == "criteria_match" || name == "verification_bites" {
+				if name == "criteria_match" || strings.HasPrefix(name, "bites_") {
 					p = 0.95
 				}
 				if adverse {
@@ -143,15 +150,12 @@ func fake(t *testing.T, adverseItems map[string]bool, delay time.Duration) (*jev
 				answers[name] = map[string]any{"type": "noul", "noul": p}
 			case "choice":
 				opts := q.Criteria.(map[string]any)
-				pick := "task_explicit"
-				if _, ok := opts["role"]; ok || name == "role" {
-					pick = "required_by_task"
+				pick, bad := "task_states_it", "nothing_asks_it"
+				if name == "role" {
+					pick, bad = "required_by_task", "optional_improvement"
 				}
 				if adverse {
-					pick = "not_asked"
-					if name == "role" {
-						pick = "optional_improvement"
-					}
+					pick = bad
 				}
 				probs := map[string]float64{}
 				for o := range opts {
@@ -172,10 +176,10 @@ func fake(t *testing.T, adverseItems map[string]bool, delay time.Duration) (*jev
 func TestRunJudgesExpectations(t *testing.T) {
 	c, calls := fake(t, map[string]bool{"S-001": true, "S-002": true, "R-002": true, "S-003": true, "R-006": true, "A-*": true}, 0)
 	rep := Run(context.Background(), c, Cases, DefaultCaps)
-	if calls.Load() != 47 || rep.Requests != 47 || rep.Skipped != 0 || rep.Errors != 0 || rep.InputTokens != 47000 || rep.Model != "jev-1.13.0" {
+	if calls.Load() != 55 || rep.Requests != 55 || rep.Skipped != 0 || rep.Errors != 0 || rep.InputTokens != 55000 || rep.Model != "jev-1.13.0" {
 		t.Fatalf("report %+v", rep)
 	}
-	if rep.CostUSD < 0.0019 || rep.CostUSD > 0.0020 {
+	if rep.CostUSD < 0.0023 || rep.CostUSD > 0.0024 {
 		t.Fatalf("cost %f", rep.CostUSD)
 	}
 	if rep.DefectsCaught != 7 || rep.Defects != 7 {
@@ -205,7 +209,7 @@ func TestRunReportsMisses(t *testing.T) {
 	}
 	var b strings.Builder
 	rep.WriteTable(&b)
-	if !strings.Contains(b.String(), "08fdr1 (defective): 0/1 expected signal(s) fired; missed: S-002's tests could not detect wrong totals (the reviewer's major) [S-002/verification_bites=false 0.05]") {
+	if !strings.Contains(b.String(), "08fdr1 (defective): 0/1 expected signal(s) fired; missed: S-002's tests could not detect wrong totals (the reviewer's major): criterion R-001.C4 [S-002/bites_R_001_C4=false 0.05]") {
 		t.Fatalf("miss line:\n%s", b.String())
 	}
 }
@@ -214,15 +218,15 @@ func TestRunReportsMisses(t *testing.T) {
 func TestRunStopsAtCaps(t *testing.T) {
 	c, calls := fake(t, nil, 0)
 	rep := Run(context.Background(), c, Cases, Caps{MaxRequests: 10, MaxElapsed: time.Minute})
-	if calls.Load() != 10 || rep.Requests != 10 || rep.Skipped != 37 || rep.StoppedBy != "request cap 10" {
+	if calls.Load() != 10 || rep.Requests != 10 || rep.Skipped != 45 || rep.StoppedBy != "request cap 10" {
 		t.Fatalf("%+v", rep)
 	}
-	if ok, why := rep.Decision(); ok || !strings.Contains(why, "37 skipped") {
+	if ok, why := rep.Decision(); ok || !strings.Contains(why, "45 skipped") {
 		t.Fatalf("%v %s", ok, why)
 	}
 	c, calls = fake(t, nil, 30*time.Millisecond)
 	rep = Run(context.Background(), c, Cases, Caps{MaxRequests: 100, MaxElapsed: 100 * time.Millisecond})
-	if calls.Load() >= 47 || rep.Skipped == 0 || !strings.HasPrefix(rep.StoppedBy, "time cap") {
+	if calls.Load() >= 55 || rep.Skipped == 0 || !strings.HasPrefix(rep.StoppedBy, "time cap") {
 		t.Fatalf("time cap: calls %d skipped %d stopped %q", calls.Load(), rep.Skipped, rep.StoppedBy)
 	}
 }
@@ -242,7 +246,7 @@ func TestRunRecordsErrorsAndContinues(t *testing.T) {
 	defer srv.Close()
 	c := &jev.Client{BaseURL: srv.URL, Key: "k", Timeout: time.Second}
 	rep := Run(context.Background(), c, Cases[:1], DefaultCaps)
-	if rep.Requests != 8 || rep.Errors != 8 || !strings.Contains(rep.Cases[0].Items[0].Err, "rate") {
+	if rep.Requests != 9 || rep.Errors != 9 || !strings.Contains(rep.Cases[0].Items[0].Err, "rate") {
 		t.Fatalf("%+v", rep.Cases[0].Items[0])
 	}
 	if b := rep.JSON(); !strings.Contains(string(b), `"error": "jev rate (HTTP 429): rate_limit_error: slow down"`) {
@@ -258,7 +262,7 @@ func TestOutgoingStatesPassTheGuard(t *testing.T) {
 	if err != nil || refused != 0 {
 		t.Fatalf("refused %d, err %v", refused, err)
 	}
-	if strings.Count(b.String(), "=== ") != 47 || strings.Contains(b.String(), "REFUSED") {
+	if strings.Count(b.String(), "=== ") != 55 || strings.Contains(b.String(), "REFUSED") {
 		t.Fatalf("dump:\n%s", b.String()[:2000])
 	}
 	if p := os.Getenv("JEV_EVAL_DUMP"); p != "" {
