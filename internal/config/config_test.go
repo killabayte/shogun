@@ -1,7 +1,6 @@
 package config
 
 import (
-	"github.com/killabayte/shogun/internal/jev"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -147,23 +146,48 @@ func mustWrite(t *testing.T, path, content string) {
 	}
 }
 
-// Jev keys: defaults match the jev package, the mode is validated, the key variable is a name (never
-// a value), and everything survives the snapshot round trip.
-func TestJevConfigKeys(t *testing.T) {
-	if d := Default(); d.Jev != JevOff || d.JevKeyEnv != jev.DefaultKeyEnv || d.JevModel != jev.DefaultModel {
-		t.Fatalf("defaults %+v", d)
-	}
-	if l, _ := Load(t.TempDir(), Overrides{}, env(map[string]string{"HOME": t.TempDir()})); l.Provenance["jev"] != "default" || l.Provenance["jev_model"] != "default" {
-		t.Fatalf("default provenance missing: %v", l.Provenance)
-	}
+// Keys of the closed Jev experiment are still accepted and ignored: a config or a run snapshot
+// written while they existed must keep loading, and they never reach the effective config.
+func TestLegacyJevKeysAreIgnored(t *testing.T) {
 	ws := t.TempDir()
-	mustWrite(t, filepath.Join(ws, ".shogun", "config.toml"), "jev = \"advisory\"\njev_api_key_env = \"JEV_DEFAULT_TEST\"\n")
+	mustWrite(t, filepath.Join(ws, ".shogun", "config.toml"),
+		"jev = \"advisory\"\njev_api_key_env = \"JEV_DEFAULT_TEST\"\njev_model = \"jev-1.13.0\"\njev_deny = [\"(?i)openvpn\"]\nproject = \"demo\"\n")
 	l, err := Load(ws, Overrides{}, env(map[string]string{"HOME": t.TempDir()}))
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || l.Config.Project != "demo" {
+		t.Fatalf("legacy keys broke loading: %v", err)
 	}
-	if l.Config.Jev != JevAdvisory || l.Config.JevKeyEnv != "JEV_DEFAULT_TEST" || l.Config.JevModel != jev.DefaultModel || !strings.HasPrefix(string(l.Provenance["jev"]), "file:") {
-		t.Fatalf("%+v %v", l.Config, l.Provenance)
+	for k := range l.Provenance {
+		if strings.HasPrefix(k, "jev") {
+			t.Fatalf("legacy key %s has provenance", k)
+		}
+	}
+	// The legacy key *variable name* is kept as strip_env metadata, so the credential it named
+	// stays out of the models' processes; the name is written to new snapshots under strip_env.
+	if !reflect.DeepEqual(l.Config.StripEnv, []string{"JEV_DEFAULT_TEST"}) || l.Provenance["strip_env"] == "default" {
+		t.Fatalf("legacy key name not kept for stripping: %v (%v)", l.Config.StripEnv, l.Provenance["strip_env"])
+	}
+	var out strings.Builder
+	l.Describe(&out)
+	data, _ := l.Snapshot()
+	if strings.Contains(out.String(), "jev ") || strings.Contains(out.String(), "jev_") || strings.Contains(string(data), "jev_") || !strings.Contains(string(data), "strip_env = ['JEV_DEFAULT_TEST']") {
+		t.Fatalf("config output or snapshot:\n%s\n%s", out.String(), data)
+	}
+	p := filepath.Join(t.TempDir(), "config.snapshot.toml")
+	os.WriteFile(p, []byte("project = \"demo\"\njev = \"off\"\njev_api_key_env = \"MY_CLASSIFIER_CREDENTIAL\"\njev_model = \"jev-1.13.0\"\njev_deny = []\n"), 0o600)
+	back, err := LoadSnapshot(p)
+	if err != nil || back.Project != "demo" || !reflect.DeepEqual(back.StripEnv, []string{"MY_CLASSIFIER_CREDENTIAL"}) {
+		t.Fatalf("an old snapshot with jev keys must load and keep the key name: %v %+v", err, back)
+	}
+}
+
+// strip_env is a supported key: names are validated, deduplicated with the legacy one, and survive
+// the snapshot round trip.
+func TestStripEnvKey(t *testing.T) {
+	ws := t.TempDir()
+	mustWrite(t, filepath.Join(ws, ".shogun", "config.toml"), "strip_env = [\"MY_TOKEN\", \"OTHER\"]\njev_api_key_env = \"MY_TOKEN\"\n")
+	l, err := Load(ws, Overrides{}, env(map[string]string{"HOME": t.TempDir()}))
+	if err != nil || !reflect.DeepEqual(l.Config.StripEnv, []string{"MY_TOKEN", "OTHER"}) {
+		t.Fatalf("%v %v", err, l.Config.StripEnv)
 	}
 	data, _ := l.Snapshot()
 	p := filepath.Join(t.TempDir(), "config.snapshot.toml")
@@ -171,17 +195,8 @@ func TestJevConfigKeys(t *testing.T) {
 	if back, err := LoadSnapshot(p); err != nil || !reflect.DeepEqual(*back, l.Config) {
 		t.Fatalf("round trip: %v\n%s", err, data)
 	}
-	if strings.Contains(string(data), "apik") {
-		t.Fatal("a key value reached the snapshot")
-	}
-	mustWrite(t, filepath.Join(ws, ".shogun", "config.toml"), "jev_deny = [\"(?i)openvpn\\\\.in\", \"cipherscale\"]\n")
-	if l, err := Load(ws, Overrides{}, env(map[string]string{"HOME": t.TempDir()})); err != nil || len(l.Config.JevDeny) != 2 || l.Provenance["jev_deny"] == "default" {
-		t.Fatalf("jev_deny: %v", err)
-	}
-	for _, bad := range []string{"jev = \"on\"\n", "jev = \"auto\"\n", "jev_api_key_env = \"JEV-DEFAULT-TEST\"\n", "jev_model = \"\"\n", "jev_deny = [\"(\"]\n"} {
-		mustWrite(t, filepath.Join(ws, ".shogun", "config.toml"), bad)
-		if _, err := Load(ws, Overrides{}, env(map[string]string{"HOME": t.TempDir()})); err == nil {
-			t.Fatalf("%q must fail", bad)
-		}
+	mustWrite(t, filepath.Join(ws, ".shogun", "config.toml"), "strip_env = [\"NOT-A-NAME\"]\n")
+	if _, err := Load(ws, Overrides{}, env(map[string]string{"HOME": t.TempDir()})); err == nil {
+		t.Fatal("an invalid variable name must fail")
 	}
 }

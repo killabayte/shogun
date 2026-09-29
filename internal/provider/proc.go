@@ -195,15 +195,16 @@ func startupConfigError(lines [][]byte, exit int, stderr []byte) bool {
 // strippedEnv are removed from the child environment so subscription auth and the requested
 // model/effort are what the CLI uses (§8). Prefixes cover model/effort/base-URL overrides.
 var (
-	strippedEnv      = map[string]bool{"CLAUDECODE": true, "CODEX_API_KEY": true, "MAX_THINKING_TOKENS": true, "RUST_LOG": true}
-	strippedPrefixes = []string{"ANTHROPIC_", "OPENAI_", "CLAUDE_CODE_", "TYPESAFE_"}
+	strippedEnv = map[string]bool{"CLAUDECODE": true, "CODEX_API_KEY": true, "MAX_THINKING_TOKENS": true, "RUST_LOG": true}
+	// TYPESAFE_ and JEV_ stay stripped after the Jev experiment: no key of any vendor reaches a model.
+	strippedPrefixes = []string{"ANTHROPIC_", "OPENAI_", "CLAUDE_CODE_", "TYPESAFE_", "JEV_"}
 
 	stripMu    sync.Mutex
-	stripExtra = map[string]bool{} // names added at runtime (StripFromChildren)
+	stripExtra = map[string]bool{} // names added at runtime (StripFromChildren): strip_env, legacy jev_api_key_env
 )
 
-// StripFromChildren adds variable names that must never reach a model's child process — the
-// configured Jev key variable, for one: the models must not be able to call Jev themselves.
+// StripFromChildren adds variable names that must never reach a model's child process: the
+// configured strip_env names, among them the key variable of the closed Jev experiment.
 func StripFromChildren(names ...string) {
 	stripMu.Lock()
 	defer stripMu.Unlock()

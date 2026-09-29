@@ -3,7 +3,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"github.com/killabayte/shogun/internal/jev"
 	"io"
 	"os"
 	"path/filepath"
@@ -33,21 +32,11 @@ type Config struct {
 	MaxTime          time.Duration // 0 = derived
 	MaxContextTokens int           // heuristic threshold before integration
 
-	// Jev (docs/plans/shogun-jev.md): an advisory classifier, off by default. JevKeyEnv names the
-	// environment variable that holds the key; the key itself is never a config value.
-	Jev       string   // "off" | "advisory"
-	JevKeyEnv string   // default TYPESAFE_API_KEY
-	JevModel  string   // pinned model id; aliases move on their own
-	JevDeny   []string // extra outbound patterns (regexps) on top of the built-in guard
+	// StripEnv names environment variables that must never reach the models' child processes, on
+	// top of the built-in provider prefixes. The key variable of the closed Jev experiment (legacy
+	// jev_api_key_env) is folded in here, so an old configuration keeps its protection.
+	StripEnv []string
 }
-
-// Jev modes and defaults (kept in sync with internal/jev by a test).
-const (
-	JevOff        = "off"
-	JevAdvisory   = "advisory"
-	JevDefaultEnv = "TYPESAFE_API_KEY"
-	JevDefault    = "jev-1.13.0"
-)
 
 // Source tells where an effective value came from.
 type Source string
@@ -83,10 +72,14 @@ type fileConfig struct {
 	MaxCalls         *int     `toml:"max_calls"`
 	MaxTime          *string  `toml:"max_time"`
 	MaxContextTokens *int     `toml:"max_context_tokens"`
-	Jev              *string  `toml:"jev"`
-	JevAPIKeyEnv     *string  `toml:"jev_api_key_env"`
-	JevModel         *string  `toml:"jev_model"`
-	JevDeny          []string `toml:"jev_deny"`
+	StripEnv         []string `toml:"strip_env"`
+	// Keys of the closed Jev experiment (2026-09-29): still accepted so configs and run snapshots
+	// from that time keep loading under the strict decoder. jev_api_key_env named a credential
+	// variable; its name is kept as strip_env metadata (never its value). The others are ignored.
+	LegacyJev       *string  `toml:"jev"`
+	LegacyJevKeyEnv *string  `toml:"jev_api_key_env"`
+	LegacyJevModel  *string  `toml:"jev_model"`
+	LegacyJevDeny   []string `toml:"jev_deny"`
 }
 
 // Default returns the built-in defaults.
@@ -98,7 +91,6 @@ func Default() Config {
 		ClaudeCommand: "claude", CodexCommand: "codex",
 		ReviewRounds: 6, DetailBatch: 1, CallDeadline: 30 * time.Minute,
 		MaxContextTokens: 400_000,
-		Jev:              JevOff, JevKeyEnv: JevDefaultEnv, JevModel: JevDefault,
 	}
 }
 
@@ -123,7 +115,7 @@ func WorkspacePath(workspace string) string {
 func Load(workspace string, ov Overrides, getenv func(string) string) (*Loaded, error) {
 	l := &Loaded{Config: Default(), Provenance: map[string]Source{}}
 	for _, k := range []string{"planner", "reviewer", "claude_command", "codex_command", "plans_dir", "project", "lang",
-		"review_rounds", "detail_batch", "call_deadline", "max_calls", "max_time", "max_context_tokens", "jev", "jev_api_key_env", "jev_model", "jev_deny"} {
+		"review_rounds", "detail_batch", "call_deadline", "max_calls", "max_time", "max_context_tokens", "strip_env"} {
 		l.Provenance[k] = "default"
 	}
 	for _, p := range []string{GlobalPath(getenv), WorkspacePath(workspace)} {
@@ -233,26 +225,29 @@ func (l *Loaded) apply(fc *fileConfig, src Source, baseDir string, getenv func(s
 		l.Config.MaxContextTokens = *fc.MaxContextTokens
 		set("max_context_tokens")
 	}
-	if fc.Jev != nil {
-		l.Config.Jev = *fc.Jev
-		set("jev")
+	if fc.StripEnv != nil {
+		l.Config.StripEnv = addNames(nil, fc.StripEnv...)
+		set("strip_env")
 	}
-	if fc.JevAPIKeyEnv != nil {
-		l.Config.JevKeyEnv = *fc.JevAPIKeyEnv
-		set("jev_api_key_env")
-	}
-	if fc.JevModel != nil {
-		l.Config.JevModel = *fc.JevModel
-		set("jev_model")
-	}
-	if fc.JevDeny != nil {
-		l.Config.JevDeny = nil // an empty list reads back as nil, like the default
-		if len(fc.JevDeny) > 0 {
-			l.Config.JevDeny = append([]string{}, fc.JevDeny...)
-		}
-		set("jev_deny")
+	if fc.LegacyJevKeyEnv != nil && *fc.LegacyJevKeyEnv != "" {
+		l.Config.StripEnv = addNames(l.Config.StripEnv, *fc.LegacyJevKeyEnv)
+		set("strip_env")
 	}
 	return nil
+}
+
+// addNames appends names not already present; an empty result stays nil.
+func addNames(names []string, more ...string) []string {
+	for _, m := range more {
+		found := false
+		for _, n := range names {
+			found = found || n == m
+		}
+		if !found {
+			names = append(names, m)
+		}
+	}
+	return names
 }
 
 func (l *Loaded) applyOverrides(ov Overrides, getenv func(string) string) error {
@@ -356,17 +351,10 @@ func (c Config) Validate() error {
 	if c.Project != "" && !ValidProject(c.Project) {
 		errs = append(errs, fmt.Sprintf("project %q must be a single safe path segment", c.Project))
 	}
-	if c.Jev != JevOff && c.Jev != JevAdvisory {
-		errs = append(errs, fmt.Sprintf("jev must be %q or %q, not %q", JevOff, JevAdvisory, c.Jev))
-	}
-	if !validEnvName(c.JevKeyEnv) {
-		errs = append(errs, fmt.Sprintf("jev_api_key_env %q is not an environment variable name", c.JevKeyEnv))
-	}
-	if c.JevModel == "" {
-		errs = append(errs, "jev_model must not be empty")
-	}
-	if _, err := jev.CompileDeny(c.JevDeny); err != nil {
-		errs = append(errs, err.Error())
+	for _, n := range c.StripEnv {
+		if !validEnvName(n) {
+			errs = append(errs, fmt.Sprintf("strip_env entry %q is not an environment variable name", n))
+		}
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("invalid configuration:\n  - %s", strings.Join(errs, "\n  - "))
@@ -416,10 +404,7 @@ type snapshot struct {
 	MaxCalls         int      `toml:"max_calls"`
 	MaxTime          string   `toml:"max_time"`
 	MaxContextTokens int      `toml:"max_context_tokens"`
-	Jev              string   `toml:"jev"`
-	JevAPIKeyEnv     string   `toml:"jev_api_key_env"`
-	JevModel         string   `toml:"jev_model"`
-	JevDeny          []string `toml:"jev_deny"`
+	StripEnv         []string `toml:"strip_env"`
 }
 
 // Snapshot renders the effective configuration as valid TOML with provenance in comments.
@@ -432,8 +417,7 @@ func (l *Loaded) Snapshot() ([]byte, error) {
 		PlansDir: c.PlansDir, Project: c.Project, Lang: c.Lang,
 		ReviewRounds: c.ReviewRounds, DetailBatch: c.DetailBatch,
 		CallDeadline: c.CallDeadline.String(), MaxCalls: c.MaxCalls, MaxTime: c.MaxTime.String(),
-		MaxContextTokens: c.MaxContextTokens,
-		Jev:              c.Jev, JevAPIKeyEnv: c.JevKeyEnv, JevModel: c.JevModel, JevDeny: c.JevDeny,
+		MaxContextTokens: c.MaxContextTokens, StripEnv: c.StripEnv,
 	})
 	if err != nil {
 		return nil, err
@@ -482,8 +466,7 @@ func (l *Loaded) Describe(w io.Writer) {
 		"plans_dir": c.PlansDir, "project": c.Project, "lang": c.Lang,
 		"review_rounds": fmt.Sprint(c.ReviewRounds), "detail_batch": fmt.Sprint(c.DetailBatch),
 		"call_deadline": c.CallDeadline.String(), "max_calls": fmt.Sprint(c.MaxCalls), "max_time": c.MaxTime.String(),
-		"max_context_tokens": fmt.Sprint(c.MaxContextTokens),
-		"jev":                c.Jev, "jev_api_key_env": c.JevKeyEnv, "jev_model": c.JevModel, "jev_deny": strings.Join(c.JevDeny, ", "),
+		"max_context_tokens": fmt.Sprint(c.MaxContextTokens), "strip_env": strings.Join(c.StripEnv, ", "),
 	}
 	keys := make([]string, 0, len(rows))
 	for k := range rows {

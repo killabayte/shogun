@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/killabayte/shogun/internal/config"
-	"github.com/killabayte/shogun/internal/jev"
 	"github.com/killabayte/shogun/internal/pipeline"
 	"github.com/killabayte/shogun/internal/provider"
 	"github.com/killabayte/shogun/internal/run"
@@ -47,7 +46,7 @@ func (a *app) cmdDoctor(args []string) int {
 	if loaded != nil {
 		cfg = loaded.Config
 	}
-	provider.StripFromChildren(cfg.JevKeyEnv)
+	provider.StripFromChildren(cfg.StripEnv...) // before any model call, doctor --live included
 	ctx, cancel := context.WithTimeout(a.ctx, 20*time.Second)
 	defer cancel()
 
@@ -81,18 +80,6 @@ func (a *app) cmdDoctor(args []string) int {
 			add("env "+v, true, "set in the parent environment; shogun strips it from child processes (subscription auth is used)")
 		}
 	}
-	jevKey := a.getenv(cfg.JevKeyEnv)
-	jevOn := cfg.Jev == config.JevAdvisory
-	switch {
-	case !jevOn:
-		add("jev", true, "off")
-	case jevKey == "":
-		add("jev", false, fmt.Sprintf("advisory, but $%s is empty: export the key there, set jev_api_key_env, or jev = \"off\"", cfg.JevKeyEnv))
-	default:
-		add("jev", true, fmt.Sprintf("advisory; key from $%s (%s); model %s; outbound guard: %d built-in pattern(s) + %d from jev_deny; the variable is stripped from child processes",
-			cfg.JevKeyEnv, jev.Redact(jevKey), cfg.JevModel, len(jev.BuiltinPatterns), len(cfg.JevDeny)))
-	}
-
 	allOK := true
 	for _, c := range checks {
 		mark := "ok  "
@@ -104,15 +91,6 @@ func (a *app) cmdDoctor(args []string) int {
 	items := preflightItems(cfg, claudePath, claudeVer, codexPath, codexVer, features, a.getenv)
 	fp := provider.Fingerprint(items)
 	recPath := preflightPath(a.cwd, fp)
-	jevOK := true
-	if jevOn && jevKey != "" {
-		// Jev is advisory and independent of the CLI certificate: its own record, its own row.
-		if *live {
-			jevOK = a.jevLive(cfg, jevKey)
-		} else {
-			fmt.Fprintf(a.stdout, "info %-16s %s\n", "jev record", jevRecordStatus(jevRecordPath(a.cwd)))
-		}
-	}
 	if !*live {
 		rec, err := provider.LoadPreflight(recPath)
 		status := "certified for this configuration"
@@ -132,66 +110,7 @@ func (a *app) cmdDoctor(args []string) int {
 		fmt.Fprintln(a.stdout, "skip live             fix the failed checks first")
 		return ExitError
 	}
-	code := a.livePreflight(cfg, claudePath, codexPath, fp, items, recPath)
-	if !jevOK && code == ExitOK {
-		code = ExitError
-	}
-	return code
-}
-
-// jevBaseURL is the endpoint doctor --live pings; tests point it at a fake server.
-var jevBaseURL = jev.DefaultBaseURL
-
-// jevRecord is .shogun/preflight/jev.json: the last successful ping, kept apart from the CLI
-// certificate so a Jev-only change never invalidates it.
-type jevRecord struct {
-	Model     string `json:"model"`     // the versioned id the API reported
-	Requested string `json:"requested"` // the configured model
-	LatencyMS int64  `json:"latency_ms"`
-	KeyEnv    string `json:"key_env"`
-	BaseURL   string `json:"base_url"`
-	At        string `json:"at"`
-}
-
-func jevRecordPath(workspace string) string {
-	return filepath.Join(workspace, ".shogun", "preflight", "jev.json")
-}
-
-func jevRecordStatus(path string) string {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return "no live record; run `shogun doctor --live`"
-	}
-	var r jevRecord
-	if json.Unmarshal(b, &r) != nil {
-		return "unreadable record; run `shogun doctor --live`"
-	}
-	return fmt.Sprintf("%s answered in %d ms at %s", r.Model, r.LatencyMS, r.At)
-}
-
-// jevLive makes one tiny request (a noul about the word "ping") and records the answer. The key
-// is never printed; a failure is a FAIL row with the API's class and message.
-func (a *app) jevLive(cfg config.Config, key string) bool {
-	deny, _ := jev.CompileDeny(cfg.JevDeny) // validated at config load
-	c := &jev.Client{BaseURL: jevBaseURL, Model: cfg.JevModel, Key: key, Timeout: jev.DefaultTimeout, Deny: deny}
-	res, err := c.Ask(a.ctx, map[string]string{"text": "ping"}, map[string]jev.Question{"is_ping": jev.Noul("Is `text` exactly the word ping?")})
-	if err != nil {
-		fmt.Fprintf(a.stdout, "FAIL %-16s %s\n", "jev live", err)
-		return false
-	}
-	rec := jevRecord{Model: res.Model, Requested: cfg.JevModel, LatencyMS: res.Latency.Milliseconds(), KeyEnv: cfg.JevKeyEnv, BaseURL: jevBaseURL, At: time.Now().UTC().Format(time.RFC3339)}
-	path := jevRecordPath(a.cwd)
-	b, _ := json.MarshalIndent(rec, "", " ")
-	werr := os.MkdirAll(filepath.Dir(path), 0o700)
-	if werr == nil {
-		werr = os.WriteFile(path, b, 0o600)
-	}
-	if werr != nil {
-		fmt.Fprintf(a.stdout, "FAIL %-16s %s answered, but the record could not be written: %v\n", "jev live", res.Model, werr)
-		return false
-	}
-	fmt.Fprintf(a.stdout, "ok   %-16s %s answered in %d ms (%d input tokens); recorded %s\n", "jev live", res.Model, rec.LatencyMS, res.Usage.InputTokens, path)
-	return true
+	return a.livePreflight(cfg, claudePath, codexPath, fp, items, recPath)
 }
 
 // preflightItems is everything the config preflight depends on (§8): a change of any of them
