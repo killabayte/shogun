@@ -189,7 +189,7 @@ func TestRunJudgesExpectations(t *testing.T) {
 	}
 	// This fake flags every assumption and S-001/S-002/R-002 everywhere, so good cases do get flags
 	// (that is the fake, not the classifier): the rule must then fail on false alarms.
-	if ok, why := rep.Decision(); ok || !strings.Contains(why, "7 of 7 defects caught") {
+	if ok, why := rep.Decision(); ok || !strings.Contains(why, "7 of 7 defects caught (5 of 7 required)") {
 		t.Fatalf("decision %v %s", ok, why)
 	}
 	var b strings.Builder
