@@ -234,8 +234,8 @@ func (r *Report) Decision() (ok bool, why string) {
 	}
 	complete := r.CaseErrors == 0 && r.Errors == 0 && r.Skipped == 0 && r.Defects == RequiredDefects && r.Good == RequiredGood
 	ok = complete && r.DefectsCaught >= MinCaught && worst <= MaxFalseAlarms
-	why = fmt.Sprintf("%d of %d defects caught (%d required); %d good case(s) (%d required), worst %d false alarm(s); %d case error(s); %d request error(s); %d skipped",
-		r.DefectsCaught, r.Defects, RequiredDefects, r.Good, RequiredGood, worst, r.CaseErrors, r.Errors, r.Skipped)
+	why = fmt.Sprintf("%d of %d defects caught (%d of %d required); %d good case(s) (%d required), worst %d false alarm(s) (%d allowed); %d case error(s); %d request error(s); %d skipped",
+		r.DefectsCaught, r.Defects, MinCaught, RequiredDefects, r.Good, RequiredGood, worst, MaxFalseAlarms, r.CaseErrors, r.Errors, r.Skipped)
 	if !complete {
 		why = "incomplete run: " + why
 	}
