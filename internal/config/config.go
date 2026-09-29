@@ -120,7 +120,7 @@ func WorkspacePath(workspace string) string {
 func Load(workspace string, ov Overrides, getenv func(string) string) (*Loaded, error) {
 	l := &Loaded{Config: Default(), Provenance: map[string]Source{}}
 	for _, k := range []string{"planner", "reviewer", "claude_command", "codex_command", "plans_dir", "project", "lang",
-		"review_rounds", "detail_batch", "call_deadline", "max_calls", "max_time", "max_context_tokens"} {
+		"review_rounds", "detail_batch", "call_deadline", "max_calls", "max_time", "max_context_tokens", "jev", "jev_api_key_env", "jev_model"} {
 		l.Provenance[k] = "default"
 	}
 	for _, p := range []string{GlobalPath(getenv), WorkspacePath(workspace)} {

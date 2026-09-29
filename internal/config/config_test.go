@@ -152,6 +152,9 @@ func TestJevConfigKeys(t *testing.T) {
 	if d := Default(); d.Jev != JevOff || d.JevKeyEnv != jev.DefaultKeyEnv || d.JevModel != jev.DefaultModel {
 		t.Fatalf("defaults %+v", d)
 	}
+	if l, _ := Load(t.TempDir(), Overrides{}, env(map[string]string{"HOME": t.TempDir()})); l.Provenance["jev"] != "default" || l.Provenance["jev_model"] != "default" {
+		t.Fatalf("default provenance missing: %v", l.Provenance)
+	}
 	ws := t.TempDir()
 	mustWrite(t, filepath.Join(ws, ".shogun", "config.toml"), "jev = \"advisory\"\njev_api_key_env = \"JEV_DEFAULT_TEST\"\n")
 	l, err := Load(ws, Overrides{}, env(map[string]string{"HOME": t.TempDir()}))
