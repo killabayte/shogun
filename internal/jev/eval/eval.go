@@ -22,6 +22,13 @@ var testdata embed.FS
 const (
 	SignalThreshold = 0.80 // adverse P at or above → a signal
 	TrimThreshold   = 0.90 // reported for information only (§2.1)
+	// QuestionsVersion names the question set a report was made with. v3 was the first live run
+	// (2026-09-29, below the rule); v4 is the one permitted rewrite: literal phrasing, the task and
+	// the item side by side, the item excluded from its context, verification per criterion.
+	QuestionsVersion = 4
+	// criteriaInline is how many per-criterion checks ride in a step's own request (with its four
+	// base questions, within the eight-question rule); more go to one extra request per eight.
+	criteriaInline = 4
 )
 
 // Plan is the subset of a planner document the evaluation reads.
@@ -69,6 +76,8 @@ type Decision struct {
 // Adverse names the outcome of one question that counts against the item: it fires when
 // P(outcome) ≥ Threshold. For a noul the outcome is "true" or "false" (P(false) = 1 − P(true)), so
 // "criteria do not match" is the outcome "false" of criteria_match at 0.80, i.e. P(true) ≤ 0.20.
+// "a|b" sums the probabilities of several options of one choice (a rule stated before the v4 run:
+// in v3 the two adverse role options split 0.48/0.44 and neither crossed the threshold).
 type Adverse struct {
 	Question  string
 	Outcome   string
@@ -120,17 +129,19 @@ var Cases = []Case{
 		{Note: "damaged-run object shape (the reviewer's major): R-002 narrows or S-001 contradicts", Any: []Signal{{"R-002", "narrows_task", "true"}, {"S-001", "contradicts_task", "true"}}},
 	}},
 	{Name: "08fdr1", Label: "defective", Dir: "08fdr1", Expect: []Expect{
-		{Note: "S-002's tests could not detect wrong totals (the reviewer's major)", Any: []Signal{{"S-002", "verification_bites", "false"}}},
+		{Note: "S-002's tests could not detect wrong totals (the reviewer's major): criterion R-001.C4", Any: []Signal{{"S-002", "bites_R_001_C4", "false"}}},
 	}},
 	{Name: "102433", Label: "good", Dir: "102433"},
 	{Name: "mutA", Label: "defective", Mutation: "mutA-extra-step.json", Expect: []Expect{
-		{Note: "an added --csv step the task never asked for", Any: []Signal{{"S-003", "role", "optional_improvement"}, {"S-003", "role", "out_of_scope"}, {"S-003", "adds_capability", "true"}}},
+		{Note: "an added --csv step the task never asked for", Any: []Signal{{"S-003", "role", "optional_improvement|out_of_scope"}, {"S-003", "adds_capability", "true"}}},
 	}},
 	{Name: "mutB", Label: "defective", Mutation: "mutB-extra-requirement.json", Expect: []Expect{
-		{Note: "an added logging requirement the task never asked for", Any: []Signal{{"R-006", "origin", "not_asked"}}},
+		{Note: "an added logging requirement the task never asked for", Any: []Signal{{"R-006", "asked_by", "nothing_asks_it"}}},
 	}},
 	{Name: "mutC", Label: "defective", Mutation: "mutC-hollow-verification.json", Expect: []Expect{
-		{Note: "S-002's verification replaced by 'go build succeeds'", Any: []Signal{{"S-002", "verification_bites", "false"}}},
+		{Note: "S-002's verification replaced by 'go build succeeds': no criterion is detected", Any: []Signal{
+			{"S-002", "bites_R_001_C1", "false"}, {"S-002", "bites_R_001_C2", "false"}, {"S-002", "bites_R_001_C3", "false"}, {"S-002", "bites_R_002_C1", "false"},
+			{"S-002", "bites_R_003_C1", "false"}, {"S-002", "bites_R_003_C2", "false"}, {"S-002", "bites_R_004_C1", "false"}, {"S-002", "bites_R_005_C1", "false"}}},
 	}},
 }
 
@@ -159,7 +170,7 @@ func Load(c Case) (task string, items []Item, err error) {
 			if err := json.Unmarshal(m.Item, &s); err != nil {
 				return "", nil, err
 			}
-			return task, []Item{stepItem(task, plan, decisions, s)}, nil
+			return task, stepItems(task, plan, decisions, s), nil
 		case "requirement":
 			var r Requirement
 			if err := json.Unmarshal(m.Item, &r); err != nil {
@@ -228,7 +239,7 @@ func Items(task string, plan *Plan, decisions []Decision) []Item {
 		}
 	}
 	for _, s := range plan.Steps {
-		items = append(items, stepItem(task, plan, decisions, s))
+		items = append(items, stepItems(task, plan, decisions, s)...)
 	}
 	for _, r := range plan.Requirements {
 		items = append(items, requirementItem(task, plan.Requirements, decisions, r))
@@ -256,8 +267,8 @@ func assumptionItem(task string, decisions []Decision, id, question, answer stri
 	return Item{ID: id, Kind: "assumption",
 		State: map[string]any{"task": task, "decisions": binding(decisions), "assumption": map[string]string{"question": question, "answer": answer}},
 		Questions: map[string]jev.Question{
-			"weakens_task":    jev.Noul("Does `assumption` drop, weaken or make an exception to something `task` explicitly requires?"),
-			"already_decided": jev.Noul("Is the matter of `assumption` already settled by `task` or by an entry of `decisions` in a way that `assumption` does not follow? An assumption that restates what is already decided is not such a case."),
+			"weakens_task":    jev.Noul("Read `task` and `assumption.answer`. Does `task` say that something must happen or must be present, and `assumption.answer` say that it will not happen, will happen differently, or will happen only in some cases?"),
+			"already_decided": jev.Noul("Does `task` or an entry of `decisions` already state the answer to `assumption.question`, and does `assumption.answer` say something different from it?"),
 		},
 		Adverse: []Adverse{{"weakens_task", "true", SignalThreshold}, {"already_decided", "true", SignalThreshold}},
 	}
@@ -265,9 +276,11 @@ func assumptionItem(task string, decisions []Decision, id, question, answer stri
 
 // §3.2
 func requirementItem(task string, all []Requirement, decisions []Decision, r Requirement) Item {
-	var list []string
+	list := []string{} // context only, and without the requirement under test
 	for _, x := range all {
-		list = append(list, x.ID+": "+x.Statement)
+		if x.ID != r.ID {
+			list = append(list, x.ID+": "+x.Statement)
+		}
 	}
 	var crit []string
 	for _, c := range r.Criteria {
@@ -277,24 +290,27 @@ func requirementItem(task string, all []Requirement, decisions []Decision, r Req
 		crit = []string{}
 	}
 	return Item{ID: r.ID, Kind: "requirement",
-		State: map[string]any{"task": task, "decisions": binding(decisions), "all_requirements": list,
-			"requirement": map[string]any{"id": r.ID, "statement": r.Statement, "type": r.Type, "mandatory": r.Mandatory, "criteria": crit}},
+		State: map[string]any{"task": task, "decisions": binding(decisions),
+			"requirement":        map[string]any{"id": r.ID, "statement": r.Statement, "type": r.Type, "mandatory": r.Mandatory, "criteria": crit},
+			"other_requirements": list},
 		Questions: map[string]jev.Question{
-			"origin": jev.Choice("Where does `requirement` come from?", map[string]string{
-				"task_explicit":              "the task states it",
-				"task_necessary_consequence": "the task does not state it, but it cannot be done without this",
-				"decision":                   "a binding entry of `decisions` asks for it",
-				"not_asked":                  "neither the task nor a decision asks for it",
-				"unknown":                    "cannot tell from the state"}),
-			"narrows_task":   jev.Noul("Does `requirement` drop or weaken part of what `task` requires about the same matter? `all_requirements` may cover other matters; judge only this requirement's own matter."),
+			"asked_by": jev.Choice("Compare `task` with `requirement.statement`. `task` and `decisions` are the only things that can ask for a requirement; `other_requirements` are context and cannot. Which is true?", map[string]string{
+				"task_states_it":   "a sentence of `task` asks for what `requirement.statement` describes, in these words or equivalent words",
+				"needed_for_task":  "`task` does not say it, but what `task` asks for cannot be done or shown without it",
+				"decision_asks_it": "an entry of `decisions` asks for it",
+				"nothing_asks_it":  "no sentence of `task` and no entry of `decisions` asks for it, and `task` can be done without it",
+				"unknown":          "cannot tell from the state"}),
+			"narrows_task":   jev.Noul("Compare `task` with `requirement.statement` and `requirement.criteria`. Does `task` name items, cases or fields about the same matter that `requirement.statement` or `requirement.criteria` leave out or exclude?"),
 			"criteria_match": jev.Noul("Do `requirement.criteria` check `requirement.statement` itself rather than something else?"),
 		},
-		Adverse: []Adverse{{"origin", "not_asked", SignalThreshold}, {"narrows_task", "true", SignalThreshold}, {"criteria_match", "false", SignalThreshold}},
+		Adverse: []Adverse{{"asked_by", "nothing_asks_it", SignalThreshold}, {"narrows_task", "true", SignalThreshold}, {"criteria_match", "false", SignalThreshold}},
 	}
 }
 
-// §3.3
-func stepItem(task string, plan *Plan, decisions []Decision, s Step) Item {
+// §3.3 (v4): one request with the step's four base questions and up to criteriaInline
+// per-criterion verification checks; further criteria go to extra requests ("S-NNN#crit…") of
+// eight checks each. The per-criterion check replaces the all-criteria verification_bites of v3.
+func stepItems(task string, plan *Plan, decisions []Decision, s Step) []Item {
 	text := map[string]string{}
 	for _, r := range plan.Requirements {
 		for _, c := range r.Criteria {
@@ -302,42 +318,63 @@ func stepItem(task string, plan *Plan, decisions []Decision, s Step) Item {
 		}
 	}
 	crit := []string{}
+	var critIDs []string
 	for _, id := range s.CriterionIDs {
 		if t, ok := text[id]; ok {
 			crit = append(crit, id+": "+t)
+			critIDs = append(critIDs, id)
 		}
 	}
-	var ver []string
+	ver := []string{}
 	for _, v := range s.Verification {
 		ver = append(ver, v.ID+" ("+v.Method+"): "+v.Expected)
 	}
-	if ver == nil {
-		ver = []string{}
-	}
-	return Item{ID: s.ID, Kind: "step",
-		State: map[string]any{"task": task, "decisions": binding(decisions), "criteria": crit,
-			"step": map[string]any{"id": s.ID, "title": s.Title, "objective": s.Objective, "actions": s.Actions, "verification": ver}},
+	state := map[string]any{"task": task, "decisions": binding(decisions), "criteria": crit,
+		"step": map[string]any{"id": s.ID, "title": s.Title, "objective": s.Objective, "actions": s.Actions, "verification": ver}}
+	base := Item{ID: s.ID, Kind: "step", State: state,
 		Questions: map[string]jev.Question{
-			"role": jev.Choice("What is `step` for?", map[string]string{
-				"required_by_task":            "the task cannot be done without it",
-				"preparation_or_verification": "needed to do or to prove the task",
-				"optional_improvement":        "would be nice; the task does not ask for it",
-				"out_of_scope":                "unrelated to the task",
+			"role": jev.Choice("Compare `task` with `step`. What is `step` for?", map[string]string{
+				"required_by_task":            "what `task` asks for cannot be done without it",
+				"preparation_or_verification": "it prepares or proves what `task` asks for",
+				"optional_improvement":        "it would be nice, and `task` does not ask for it",
+				"out_of_scope":                "it has nothing to do with `task`",
 				"unknown":                     "cannot tell from the state"}),
-			"adds_capability":    jev.Noul("Do `step.actions` add a capability, option or generality that neither `task` nor `criteria` ask for?"),
-			"oversized":          jev.Noul("Do `step.actions` do more than `step.objective` and `criteria` need?"),
-			"verification_bites": jev.Noul("Would `step.verification`, as written, detect a violation of every one of `criteria` if the step's result broke that criterion? Existing tests count when they assert the criterion. Answer no if at least one listed criterion could be violated without any listed verification failing."),
-			"contradicts_task":   jev.Noul("Does any of `step.actions` do the opposite of something `task` explicitly requires?"),
+			"adds_capability":  jev.Noul("Do `step.actions` add a capability, option or generality that neither `task` nor `criteria` ask for?"),
+			"oversized":        jev.Noul("Do `step.actions` do more than `step.objective` and `criteria` need?"),
+			"contradicts_task": jev.Noul("Compare `task` with `step.actions`. Does `task` say that something must happen or must be present, and `step.actions` make it not happen or leave it out? Or does `task` say something must not happen, and `step.actions` do it?"),
 		},
-		Adverse: []Adverse{{"role", "optional_improvement", SignalThreshold}, {"role", "out_of_scope", SignalThreshold},
-			{"adds_capability", "true", SignalThreshold}, {"oversized", "true", SignalThreshold},
-			{"verification_bites", "false", SignalThreshold}, {"contradicts_task", "true", SignalThreshold}},
+		Adverse: []Adverse{{"role", "optional_improvement|out_of_scope", SignalThreshold},
+			{"adds_capability", "true", SignalThreshold}, {"oversized", "true", SignalThreshold}, {"contradicts_task", "true", SignalThreshold}},
 	}
+	check := func(id string) (string, jev.Question) {
+		name := "bites_" + strings.NewReplacer("-", "_", ".", "_").Replace(id)
+		return name, jev.Noul("Read `step.verification` and the criterion " + id + " in `criteria`. If the step's result violated " + id + ", would at least one of `step.verification`, as written, fail? Existing tests count when they assert this criterion.")
+	}
+	items := []Item{base}
+	for i, id := range critIDs {
+		name, q := check(id)
+		target := &items[0]
+		if i >= criteriaInline {
+			n := 1 + (i-criteriaInline)/8
+			extraID := fmt.Sprintf("%s#crit%d", s.ID, n)
+			if items[len(items)-1].ID != extraID {
+				items = append(items, Item{ID: extraID, Kind: "step-criteria", State: state, Questions: map[string]jev.Question{}})
+			}
+			target = &items[len(items)-1]
+		}
+		target.Questions[name] = q
+		target.Adverse = append(target.Adverse, Adverse{name, "false", SignalThreshold})
+	}
+	return items
 }
 
-// Hit reports whether an answer meets an adverse spec, and the probability compared.
+// Hit reports whether an answer meets an adverse spec, and the probability compared: the sum over
+// the outcomes named in Outcome ("a|b").
 func Hit(a jev.Answer, adv Adverse) (bool, float64) {
-	p := a.P(adv.Outcome)
+	p := 0.0
+	for _, o := range strings.Split(adv.Outcome, "|") {
+		p += a.P(o)
+	}
 	return p >= adv.Threshold, p
 }
 

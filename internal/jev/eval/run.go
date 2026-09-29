@@ -57,15 +57,16 @@ type CaseResult struct {
 // Report is one evaluation run. Every input to Decision is in the JSON, so a saved report
 // decides the same way when read back.
 type Report struct {
-	Model       string        `json:"model"`
-	Cases       []CaseResult  `json:"cases"`
-	Requests    int           `json:"requests"`
-	Skipped     int           `json:"skipped"`
-	InputTokens int64         `json:"input_tokens"`
-	CostUSD     float64       `json:"cost_usd"` // list price, $0.042 per million input tokens
-	Elapsed     time.Duration `json:"elapsed"`
-	Errors      int           `json:"errors"`      // failed requests
-	CaseErrors  int           `json:"case_errors"` // cases that could not be loaded
+	QuestionsVersion int           `json:"questions_version"`
+	Model            string        `json:"model"`
+	Cases            []CaseResult  `json:"cases"`
+	Requests         int           `json:"requests"`
+	Skipped          int           `json:"skipped"`
+	InputTokens      int64         `json:"input_tokens"`
+	CostUSD          float64       `json:"cost_usd"` // list price, $0.042 per million input tokens
+	Elapsed          time.Duration `json:"elapsed"`
+	Errors           int           `json:"errors"`      // failed requests
+	CaseErrors       int           `json:"case_errors"` // cases that could not be loaded
 	// Decision inputs (§7): defective cases judged and caught; good cases judged and their false
 	// alarms at the signal threshold.
 	Defects         int            `json:"defects"`
@@ -88,7 +89,7 @@ const listPricePerMillion = 0.042
 // Run asks Jev about every item of every case, sequentially, within caps. A failed request is
 // recorded and the run goes on; a cap stops the run and marks the rest skipped.
 func Run(ctx context.Context, c *jev.Client, cases []Case, caps Caps) *Report {
-	rep := &Report{GoodFalseAlarms: map[string]int{}}
+	rep := &Report{QuestionsVersion: QuestionsVersion, GoodFalseAlarms: map[string]int{}}
 	start := time.Now()
 	// The time cap is a deadline on every request, not only a check between requests: a request in
 	// flight when the cap arrives is cut and counted as skipped.
@@ -173,8 +174,9 @@ func judge(cr *CaseResult, cs Case) {
 	covered := map[string]bool{}
 	fired := map[string]bool{}
 	for _, ir := range cr.Items {
+		id, _, _ := strings.Cut(ir.ID, "#") // criterion checks belong to their step
 		for _, f := range ir.Flags {
-			fired[ir.ID+"/"+f.Question+"="+f.Outcome] = true
+			fired[id+"/"+f.Question+"="+f.Outcome] = true
 		}
 	}
 	for _, e := range cs.Expect {
@@ -187,7 +189,7 @@ func judge(cr *CaseResult, cs Case) {
 				met = true
 			}
 			for _, ir := range cr.Items {
-				if ir.ID == s.Item {
+				if ir.ID == s.Item || strings.HasPrefix(ir.ID, s.Item+"#") {
 					if p, ok := ir.adverseAt[s.Question+"="+s.Outcome]; ok {
 						seen = append(seen, fmt.Sprintf("%s %.2f", key, p))
 					} else if ir.Skipped {
@@ -205,8 +207,9 @@ func judge(cr *CaseResult, cs Case) {
 		}
 	}
 	for _, ir := range cr.Items {
+		id, _, _ := strings.Cut(ir.ID, "#")
 		for _, f := range ir.Flags {
-			if key := ir.ID + "/" + f.Question + "=" + f.Outcome; !covered[key] {
+			if key := id + "/" + f.Question + "=" + f.Outcome; !covered[key] {
 				cr.FalseAlarms = append(cr.FalseAlarms, fmt.Sprintf("%s %.2f", key, f.P))
 			}
 		}
@@ -292,7 +295,7 @@ func (r *Report) WriteTable(w io.Writer) {
 	if ok {
 		verdict = "meets the §7 rule"
 	}
-	fmt.Fprintf(w, "\nmodel %s; %d request(s), %d skipped, %d error(s); %d input tokens ($%.4f list price); %.1fs", r.Model, r.Requests, r.Skipped, r.Errors, r.InputTokens, r.CostUSD, r.Elapsed.Seconds())
+	fmt.Fprintf(w, "\nquestions v%d; model %s; %d request(s), %d skipped, %d error(s); %d input tokens ($%.4f list price); %.1fs", r.QuestionsVersion, r.Model, r.Requests, r.Skipped, r.Errors, r.InputTokens, r.CostUSD, r.Elapsed.Seconds())
 	if r.StoppedBy != "" {
 		fmt.Fprintf(w, "; stopped by %s", r.StoppedBy)
 	}
