@@ -1,0 +1,12 @@
+[
+ {
+  "question": "When there are no runs, what should `shogun stats --json` print?",
+  "answer": "Keep today's behaviour: stderr message, empty stdout, exit 0. This is the smallest change and easy to reverse.",
+  "source": "assumption"
+ },
+ {
+  "question": "Are the JSON field names acceptable (snake_case as in state.json: id, status, mode, planner, reviewer, attempts, active_seconds, input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens, cost_usd, usage, damaged; totals with by_status, spend_lower_bound, usage_lower_bound, usage_incomplete_runs, usage_unknown_runs)?",
+  "answer": "Use the proposed names.",
+  "source": "assumption"
+ }
+]

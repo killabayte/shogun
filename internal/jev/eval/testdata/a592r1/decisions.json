@@ -1,0 +1,12 @@
+[
+ {
+  "question": "Are these JSON key names and this shape acceptable? The shape is {runs:[{id,status,mode,planner,reviewer,attempts,active_seconds,input_tokens,cache_read_tokens,cache_write_tokens,output_tokens,reasoning_tokens,cost_usd,usage,damaged?}], totals:{runs,by_status,damaged,attempts,active_seconds,input_tokens,cache_read_tokens,cache_write_tokens,output_tokens,reasoning_tokens,cost_usd,spend_lower_bound,usage_lower_bound}}.",
+  "answer": "Use the proposed names with two lower-bound flags. The text output already distinguishes attempts/time (lower bound only when runs are damaged) from tokens/cost (also when usage is missing).",
+  "source": "assumption"
+ },
+ {
+  "question": "With --json and no runs in the directory, should stats print an empty document (runs [] and zero totals) or keep today's behaviour (a note on stderr and nothing on stdout)?",
+  "answer": "Print an empty document on stdout and no stderr note. Moving the JSON call below the early return would switch to the other option.",
+  "source": "assumption"
+ }
+]

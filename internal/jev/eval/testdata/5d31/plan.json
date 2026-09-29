@@ -1,0 +1,253 @@
+{
+ "requirements": [
+  {
+   "id": "R-001",
+   "statement": "With `--json`, `shogun stats` prints one JSON document on stdout instead of the table and totals. The document has a `runs` array with one object per run and a `totals` object, holding the same data as the table and totals.",
+   "source_ids": [
+    "task"
+   ],
+   "type": "functional",
+   "mandatory": true,
+   "criteria": [
+    {
+     "id": "R-001.C1",
+     "text": "On the five fixture runs, `shogun stats --json` exits 0. Its stdout parses as exactly one JSON object with the keys `runs` and `totals`, and contains neither the table header (`RUN\\tSTATUS` / `CLAUDE $`) nor the `total:` line."
+    },
+    {
+     "id": "R-001.C2",
+     "text": "Every object in `runs` has the keys id, status, mode, planner, reviewer, attempts, active_seconds, input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens, cost_usd, usage and damaged. Runs are sorted by id. For run 20260927-000001-a: status \"approved\", mode \"fast\", planner \"claude/opus:high\", attempts 2, active_seconds 150, input_tokens 100, cache_read_tokens 1000, output_tokens 50, reasoning_tokens 20, cost_usd 0.5, usage \"ok\", damaged null. For 20260927-000002-b: usage \"unknown\"."
+    },
+    {
+     "id": "R-001.C3",
+     "text": "`totals` has runs 5, by_status {approved 1, failed 1, needs_input 1, paused 1} (damaged run excluded), damaged 1, attempts 6, active_seconds 750, input_tokens 100, cache_read_tokens 1000, cache_write_tokens 0, output_tokens 50, reasoning_tokens 20, cost_usd 0.5, spend_lower_bound true and tokens_lower_bound true."
+    }
+   ]
+  },
+  {
+   "id": "R-002",
+   "statement": "A damaged run's object also has every listed key. Values that are not available are null (not zero), and `damaged` holds the damage reason.",
+   "source_ids": [
+    "task"
+   ],
+   "type": "functional",
+   "mandatory": true,
+   "criteria": [
+    {
+     "id": "R-002.C1",
+     "text": "For damaged run 20260927-000003-c, each of the keys mode, planner, reviewer, attempts, active_seconds, input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens, cost_usd and usage is present and JSON null. id is the run id, status is \"damaged\", and damaged is a non-empty string."
+    }
+   ]
+  },
+  {
+   "id": "R-003",
+   "statement": "With `--json` and no runs in the directory, stdout holds one JSON document: `runs` is `[]`, every numeric total is 0, `by_status` is `{}`, both lower-bound flags are false, and the exit code is 0. Only text mode keeps the early exit with a note on stderr.",
+   "source_ids": [
+    "task"
+   ],
+   "type": "functional",
+   "mandatory": true,
+   "criteria": [
+    {
+     "id": "R-003.C1",
+     "text": "On an existing, empty runs directory, `shogun stats --json` exits 0. Its stdout parses as one JSON object in which `runs` is an empty array (not null) and `totals.by_status` is an empty object (not null). The totals runs, damaged, attempts, active_seconds, the five token sums and cost_usd are all present and 0. spend_lower_bound and tokens_lower_bound are false. stderr does not contain \"no runs in\"."
+    },
+    {
+     "id": "R-003.C2",
+     "text": "On the same empty directory, `shogun stats` without the flag still exits 0 with empty stdout and \"no runs in\" on stderr."
+    }
+   ]
+  },
+  {
+   "id": "R-004",
+   "statement": "Without `--json`, the output of `shogun stats` stays exactly as it is now.",
+   "source_ids": [
+    "task"
+   ],
+   "type": "constraint",
+   "mandatory": true,
+   "criteria": [
+    {
+     "id": "R-004.C1",
+     "text": "The existing assertions in TestStatsCountsEveryRunAndFlagsMissingUsage on the text output pass without being changed."
+    },
+    {
+     "id": "R-004.C2",
+     "text": "The diff of cmd/shogun/stats.go leaves every table and totals Fprintf/Fprintln format string, and its arguments, unchanged. Without the flag, the text path runs the same writes in the same order."
+    }
+   ]
+  },
+  {
+   "id": "R-005",
+   "statement": "`shogun stats` stays read-only with `--json`.",
+   "source_ids": [
+    "task"
+   ],
+   "type": "constraint",
+   "mandatory": true,
+   "criteria": [
+    {
+     "id": "R-005.C1",
+     "text": "After `shogun stats --json`, the bytes of run 20260927-000001-a's state.json are the same as before the call."
+    }
+   ]
+  }
+ ],
+ "steps": [
+  {
+   "id": "S-001",
+   "title": "Implement `--json` in cmdStats",
+   "objective": "`shogun stats --json` prints one JSON document with runs and totals, including when the directory is empty. The text output is unchanged.",
+   "requirement_ids": [
+    "R-001",
+    "R-002",
+    "R-003",
+    "R-004",
+    "R-005"
+   ],
+   "criterion_ids": [
+    "R-004.C2"
+   ],
+   "depends_on": [],
+   "targets": [
+    {
+     "repo_id": "repo-1",
+     "path": "cmd/shogun/stats.go",
+     "operation": "modify"
+    }
+   ],
+   "actions": [
+    "Add \"encoding/json\" to the imports.",
+    "In cmdStats, after the --dir flag, add `asJSON := fs.Bool(\"json\", false, \"print runs and totals as one JSON document\")`.",
+    "Add a type statsRunJSON with these json tags and no omitempty: id and status (string); mode, planner, reviewer and usage (*string); attempts (*int); active_seconds (*float64); input_tokens, cache_read_tokens, cache_write_tokens, output_tokens and reasoning_tokens (*int64); cost_usd (*float64); damaged (*string).",
+    "Add a type statsTotalsJSON with these fields and no omitempty: runs int, by_status map[string]int, damaged int, attempts int, active_seconds float64, the five token sums (int64), cost_usd float64, spend_lower_bound bool and tokens_lower_bound bool.",
+    "Change the no-runs check to `if len(runs) == 0 && !*asJSON`. Leave its body (stderr note, return ExitOK) untouched.",
+    "Write the tabwriter header Fprintln only when !*asJSON; keep its format string unchanged. Before the loop, declare `rows := []statsRunJSON{}` (non-nil, so an empty list encodes as []).",
+    "In the loop, for a damaged run: always damaged++. If asJSON, append {id: r.id, status: \"damaged\", damaged: &r.damaged}, all other fields nil. Otherwise, write the existing damaged table row. Then continue.",
+    "For a readable run: byStatus, partial and every tot.* addition still run in both modes. If asJSON, append a row with id, status string(r.st.Status), and pointers to mode, r.planner, r.reviewer (as recorded, not dash()), u, c.Attempts, c.ActiveSeconds (raw seconds), the five token counts and c.CostUSD, with damaged nil. Otherwise, write the existing Fprintf row unchanged.",
+    "After the loop and before tw.Flush(), if asJSON: fill statsTotalsJSON from len(runs), byStatus (the existing non-nil map), damaged and tot.*. Set spend_lower_bound = damaged > 0 and tokens_lower_bound = len(partial) > 0 || damaged > 0. Marshal map/struct {\"runs\": rows, \"totals\": totals} with json.MarshalIndent(v, \"\", \" \"), Fprintln the result to a.stdout and return ExitOK. The text path (tw.Flush and the totals prints) follows unchanged."
+   ],
+   "verification": [
+    {
+     "id": "V-001",
+     "repo_id": "repo-1",
+     "method": "inspect",
+     "expected": "In git diff cmd/shogun/stats.go, every existing table and totals format string and its arguments are byte-identical. The only changes around the text writes are the added `!*asJSON` / `if *asJSON` guards (R-004.C2)."
+    },
+    {
+     "id": "V-002",
+     "repo_id": "repo-1",
+     "method": "command",
+     "expected": "gofmt -l cmd/shogun prints nothing, and go vet ./cmd/shogun passes."
+    }
+   ],
+   "risks": [
+    {
+     "risk": "Guarding the header or the early exit accidentally changes the text output.",
+     "mitigation": "Guard with the flag only and leave the format strings as they are. The unchanged text test and the text-mode empty-directory assertion (S-002) protect the text output."
+    }
+   ],
+   "rollback_or_why_not_applicable": "git checkout cmd/shogun/stats.go reverts the change. No data or run state is touched."
+  },
+  {
+   "id": "S-002",
+   "title": "Test the JSON output and the empty directory",
+   "objective": "Cover the JSON document, the damaged-run nulls, the empty-directory document and read-only behaviour, leaving the text assertions unchanged.",
+   "requirement_ids": [
+    "R-001",
+    "R-002",
+    "R-003",
+    "R-004",
+    "R-005"
+   ],
+   "criterion_ids": [
+    "R-001.C1",
+    "R-001.C2",
+    "R-001.C3",
+    "R-002.C1",
+    "R-003.C1",
+    "R-003.C2",
+    "R-004.C1",
+    "R-005.C1"
+   ],
+   "depends_on": [
+    "S-001"
+   ],
+   "targets": [
+    {
+     "repo_id": "repo-1",
+     "path": "cmd/shogun/stats_test.go",
+     "operation": "modify"
+    }
+   ],
+   "actions": [
+    "Add \"encoding/json\" to the imports.",
+    "At the end of TestStatsCountsEveryRunAndFlagsMissingUsage, keep the existing assertions as they are. Call runCLI(t, ws, \"stats\", \"--json\") and assert ExitOK. Assert that stdout contains neither \"CLAUDE $\" nor \"total:\". json.Unmarshal it into map[string]any, failing on error, and check that `runs` has 5 entries in id order and that `totals` is present.",
+    "For each run object, check that all 15 keys are present (comma-ok lookup). Check that run a's values match R-001.C2, with damaged nil, and that run b's usage is \"unknown\".",
+    "For damaged run 20260927-000003-c, check that each of mode, planner, reviewer, attempts, active_seconds, the five token keys, cost_usd and usage is present and nil, that status is \"damaged\", and that damaged is a non-empty string.",
+    "Check that the totals equal the values in R-001.C3 (JSON numbers decode as float64).",
+    "After the --json call, compare run a's state.json with `before` again.",
+    "Add TestStatsJSONEmptyDir. Set HOME to t.TempDir() and create run.RunsRoot(ws) with os.MkdirAll and no entries. Run `stats --json`: assert ExitOK and that stderr does not contain \"no runs in\". Unmarshal stdout and check that `runs` is a non-nil empty []any, that `by_status` is a non-nil empty map, that every numeric total key is present and 0, and that both lower-bound flags are false. Then run `stats` without the flag: assert ExitOK, empty stdout, and \"no runs in\" on stderr."
+   ],
+   "verification": [
+    {
+     "id": "V-003",
+     "repo_id": "repo-1",
+     "method": "test",
+     "expected": "go test ./cmd/shogun -run TestStats passes. That includes the document's shape (R-001.C1), the run values (R-001.C2) and the totals (R-001.C3)."
+    },
+    {
+     "id": "V-004",
+     "repo_id": "repo-1",
+     "method": "test",
+     "expected": "The damaged-run assertions in the same run pass: all listed keys are present and null, status is \"damaged\", and damaged is a non-empty string (R-002.C1)."
+    },
+    {
+     "id": "V-005",
+     "repo_id": "repo-1",
+     "method": "test",
+     "expected": "TestStatsJSONEmptyDir passes its --json part: runs is [], by_status is {}, the numeric totals are 0, the flags are false, exit is 0 and there is no stderr note (R-003.C1)."
+    },
+    {
+     "id": "V-006",
+     "repo_id": "repo-1",
+     "method": "test",
+     "expected": "The text-mode part of TestStatsJSONEmptyDir passes: exit 0, empty stdout, and \"no runs in\" on stderr (R-003.C2)."
+    },
+    {
+     "id": "V-007",
+     "repo_id": "repo-1",
+     "method": "inspect",
+     "expected": "git diff cmd/shogun/stats_test.go changes none of the existing text assertions; it only adds lines after them, plus the new test. Those assertions still pass (R-004.C1)."
+    },
+    {
+     "id": "V-008",
+     "repo_id": "repo-1",
+     "method": "test",
+     "expected": "The state.json comparison after `stats --json` passes (R-005.C1)."
+    },
+    {
+     "id": "V-009",
+     "repo_id": "repo-1",
+     "method": "command",
+     "expected": "go test ./... passes."
+    }
+   ],
+   "risks": [],
+   "rollback_or_why_not_applicable": "git checkout cmd/shogun/stats_test.go reverts the test changes."
+  }
+ ],
+ "questions": [
+  {
+   "id": "Q-001",
+   "question": "Should the usage line in cmd/shogun/main.go:97 (`shogun stats [--dir d]`) and the stats row in README.md:242 also mention `--json`?",
+   "why": "The task does not mention the help text or the README, but both list the stats flags. Without an update, the new flag would be missing from both.",
+   "impact": "Yes adds a one-line edit to main.go and to README.md. No leaves the plan as it is.",
+   "options": [
+    "Leave the help text and README unchanged",
+    "Add `--json` to the usage line and the README row"
+   ],
+   "proposed_assumption": "Leave both unchanged, since the task does not ask for it. The edit is a one-line, reversible addition if wanted.",
+   "blocking": false
+  }
+ ]
+}
