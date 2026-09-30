@@ -266,10 +266,8 @@ func (e *Engine) publish(ctx context.Context) *Outcome {
 	// Runs whose manifest predates the sidecar do not exclude it from repository fingerprints; a
 	// sidecar left by an interrupted publication must not read as drift. The tolerance is for this
 	// check only: the sidecar installed below stays the frozen run bytes.
-	driftManifest := *e.Manifest
-	driftManifest.Exclude = withExclusion(e.Manifest.Exclude, library.ManifestPath(out))
 	octx, cancel := e.opCtx(ctx)
-	drift, err := inputs.CheckDrift(octx, &driftManifest)
+	drift, err := inputs.CheckDrift(octx, DriftManifest(e.Manifest, out))
 	cancel()
 	if o := e.timeUp("the drift check finished"); o != nil {
 		return o
@@ -347,12 +345,23 @@ func manifestMatchesReceipt(manifest, receipt []byte) error {
 	return nil
 }
 
-// withExclusion returns exclude plus path, without duplicates and without touching the original.
-func withExclusion(exclude []string, path string) []string {
-	if slices.Contains(exclude, path) {
-		return exclude
+// DriftManifest returns a copy of man for drift checks whose Exclude also covers the run's own
+// three outputs at publishPath: the plan, the receipt and the manifest sidecar. Manifests written
+// before S0 list only the first two, so a sidecar left by an interrupted publication would
+// otherwise read as repository drift on resume and demand a new generation. Only these owned
+// paths are tolerated; neither the original manifest nor the frozen bytes that get published change.
+func DriftManifest(man *inputs.Manifest, publishPath string) *inputs.Manifest {
+	cp := *man
+	cp.Exclude = append([]string{}, man.Exclude...)
+	if publishPath == "" {
+		return &cp
 	}
-	return append(append([]string{}, exclude...), path)
+	for _, p := range []string{publishPath, library.ReceiptPath(publishPath), library.ManifestPath(publishPath)} {
+		if !slices.Contains(cp.Exclude, p) {
+			cp.Exclude = append(cp.Exclude, p)
+		}
+	}
+	return &cp
 }
 
 // writeOnce installs data at path with the public output mode; see installOnce.

@@ -103,7 +103,8 @@ func (a *app) cmdResume(args []string) int {
 		fmt.Fprintf(a.stderr, "[resume] new generation %d: repositories re-snapshotted, planning starts again at %s; spend so far is kept\n", st.Generation, st.Cursor.Stage)
 	} else if man, err := inputs.Load(filepath.Join(dir, "manifest.json")); err == nil {
 		// §9: changed repositories need an explicit new generation; approvals are never inherited.
-		if drift, err := inputs.CheckDrift(pctx, man); errors.Is(err, inputs.ErrDrift) {
+		// The run's own outputs, including a sidecar left by an interrupted publication, are not drift.
+		if drift, err := inputs.CheckDrift(pctx, pipeline.DriftManifest(man, st.Publish.Path)); errors.Is(err, inputs.ErrDrift) {
 			return a.errorf("inputs changed since the snapshot (%s): run `shogun resume %s --refresh` for a new generation", strings.Join(drift, ", "), st.RunID)
 		}
 	}
