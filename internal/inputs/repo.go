@@ -80,10 +80,16 @@ func RepoManifest(ctx context.Context, id, root string, exclude ...string) (Repo
 		r.InventorySHA256 = sum
 		r.Note = "non-git inventory: (path,size,mtime) only; a same-size same-mtime edit is not detected"
 	}
+	r.Fingerprint = r.ComputeFingerprint()
+	return r, nil
+}
+
+// ComputeFingerprint derives the repository fingerprint from the recorded head, change and
+// inventory digests, so a stored Repo can be checked for internal consistency without its tree.
+func (r Repo) ComputeFingerprint() string {
 	h := sha256.New()
 	fmt.Fprintf(h, "%v\x00%s\x00%s\x00%s\x00%s", r.IsGit, r.Head, r.DiffSHA256, r.UntrackedSHA256, r.InventorySHA256)
-	r.Fingerprint = hex.EncodeToString(h.Sum(nil))
-	return r, nil
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func git(ctx context.Context, root string, args ...string) ([]byte, error) {

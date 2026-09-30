@@ -135,9 +135,10 @@ the reason for any stop go to stderr. While a model call runs, a line every 30 s
 4. **review.** shogun renders the candidate document, and one reviewer call reviews exactly those bytes. Only
    blocker and major findings block; minor ones are kept as review notes. On `revise`, one planner revision
    and one more review follow, and that is the limit.
-5. **publish.** Repositories and input snapshots are checked for drift first. Then the receipt is written, then
-   the plan, each atomically and never over a file that is not shogun's. The run is `approved` only once
-   `verify` passes.
+5. **publish.** Repositories and input snapshots are checked for drift first. Then the frozen input manifest
+   of the approved generation is written as `<plan>.manifest.json`, then the receipt, then the plan, each
+   atomically and never over a file that is not shogun's. The run is `approved` only once the three files
+   verify.
 
 **Budgets are enforced, not advisory.** The whole run is capped at four physical attempts — retries, format
 corrections and re-planning after answers included — and ten minutes of active time, which counts shogun's
@@ -207,6 +208,13 @@ reviewer: codex/gpt-6-astra:high
 requested and reported models. It holds no local paths or prompts. Editing `status`, `tags`, `updated` or the
 execution log keeps the plan valid; anything else does not.
 
+`<plan>.manifest.json` is the third file: the input manifest of the approved generation exactly as it was
+snapshotted at intake — full repository heads and fingerprints, input hashes and roles — whose digest the
+receipt's `manifest_digest` binds. It lets an executor pin the planning base without the run directory. It
+contains the local repository paths, so it is written with private permissions; do not add it to a shared
+plans repository unless that is acceptable. `shogun verify --require-manifest` checks it; plain `verify`
+keeps accepting a plan/receipt pair published before this file existed.
+
 | Code | `plan` / `resume` |
 |---|---|
 | `0` | plan approved and published |
@@ -238,7 +246,7 @@ too. Claude does not report effort, so it is recorded as `unknown`.
 | `shogun plan` | runs intake, plans, reviews and publishes |
 | `shogun resume <run>` | continues a run: `--answers`, `--refresh`, `--max-calls`, `--max-time` |
 | `shogun status <run>` | stage, stop reason, spend and limits; `--json` prints the state |
-| `shogun verify <plan.md>` | `valid` (0), `changed` (1), `unverifiable` (2, receipt missing) or `invalid_format` (2) |
+| `shogun verify <plan.md>` | `valid` (0), `changed` (1), `unverifiable` (2, receipt missing) or `invalid_format` (2); `--require-manifest` also checks `<plan>.manifest.json` against the receipt's manifest digest (missing/corrupt → 2, mismatched → 1) |
 | `shogun stats` | every run in `.shogun/runs` (stopped and failed too): status, models, attempts, active time, tokens, Claude list-price equivalent; runs without usage are marked `unknown`, unreadable ones `damaged`; `--dir`; `--json` prints the same as one document (every run object has every key, `null` where a damaged run has no value) |
 | `shogun list` | published plans with execution status and integrity; `--dir`, `--status`, `--project` |
 | `shogun doctor` | binaries, versions, config and the preflight certificate; `--live` certifies a model pair |

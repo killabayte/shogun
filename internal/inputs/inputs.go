@@ -274,12 +274,17 @@ func (m *Manifest) Save(path string) error {
 	return os.WriteFile(path, data, 0o600)
 }
 
-// Load reads a manifest.
+// Load reads a manifest file.
 func Load(path string) (*Manifest, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
+	return Decode(data)
+}
+
+// Decode parses manifest bytes and rejects unsupported versions.
+func Decode(data []byte) (*Manifest, error) {
 	var m Manifest
 	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, err

@@ -248,9 +248,10 @@ func (e *Engine) recordApproval(candidate []byte, reviewRel string) error {
 	return e.Run.WriteArtifact("approval.json", append(b, '\n'))
 }
 
-// publish writes exactly the reviewed bytes (§9): the receipt first, then the plan, each atomically
-// and never over a different file; the run is approved only after both verify. It is idempotent: a
-// crash between the two files is repaired by running it again, without model calls.
+// publish writes exactly the reviewed bytes (§9): the frozen manifest of the approved generation
+// as <stem>.manifest.json (S0), then the receipt, then the plan, each atomically and never over a
+// different file; the run is approved only after the triplet verifies. It is idempotent: a crash
+// between any two of the files is repaired by running it again, without model calls.
 func (e *Engine) publish(ctx context.Context) *Outcome {
 	if o := e.timeUp("publication"); o != nil {
 		return o
@@ -258,8 +259,17 @@ func (e *Engine) publish(ctx context.Context) *Outcome {
 	if err := e.checkSnapshots(); err != nil {
 		return e.fail("publish", err)
 	}
+	out := e.State.Publish.Path
+	if out == "" {
+		return e.fail("publish", errors.New("no output path recorded for this run"))
+	}
+	// Runs whose manifest predates the sidecar do not exclude it from repository fingerprints; a
+	// sidecar left by an interrupted publication must not read as drift. The tolerance is for this
+	// check only: the sidecar installed below stays the frozen run bytes.
+	driftManifest := *e.Manifest
+	driftManifest.Exclude = withExclusion(e.Manifest.Exclude, library.ManifestPath(out))
 	octx, cancel := e.opCtx(ctx)
-	drift, err := inputs.CheckDrift(octx, e.Manifest)
+	drift, err := inputs.CheckDrift(octx, &driftManifest)
 	cancel()
 	if o := e.timeUp("the drift check finished"); o != nil {
 		return o
@@ -281,9 +291,12 @@ func (e *Engine) publish(ctx context.Context) *Outcome {
 	if digest(candidate) != e.State.Hashes["candidate"] {
 		return e.fail("publish", errors.New("candidate.md differs from the approved candidate"))
 	}
-	out := e.State.Publish.Path
-	if out == "" {
-		return e.fail("publish", errors.New("no output path recorded for this run"))
+	manifest, err := os.ReadFile(filepath.Join(e.Run.Dir, "manifest.json"))
+	if err != nil {
+		return e.fail("publish", err)
+	}
+	if err := manifestMatchesReceipt(manifest, receipt); err != nil {
+		return e.fail("publish", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 		return e.fail("publish", err)
@@ -291,12 +304,13 @@ func (e *Engine) publish(ctx context.Context) *Outcome {
 	for _, f := range []struct {
 		path string
 		data []byte
-	}{{library.ReceiptPath(out), receipt}, {out, candidate}} {
-		if err := writeOnce(f.path, f.data); err != nil {
+		mode fs.FileMode
+	}{{library.ManifestPath(out), manifest, 0o600}, {library.ReceiptPath(out), receipt, 0o644}, {out, candidate, 0o644}} {
+		if err := installOnce(f.path, f.data, f.mode); err != nil {
 			return e.fail("publish", err)
 		}
 	}
-	if got, note := library.Verify(out); got != library.Valid {
+	if got, note := library.VerifyWithManifest(out); got != library.Valid {
 		return e.fail("publish", fmt.Errorf("published plan does not verify: %s (%s)", got, note))
 	}
 	if err := e.Run.WriteArtifact("PLAN.md", candidate); err != nil {
@@ -304,17 +318,57 @@ func (e *Engine) publish(ctx context.Context) *Outcome {
 	}
 	e.State.Publish.Done = true
 	e.State.Cursor = run.Cursor{Stage: StagePublish}
-	e.logf("[publish] %s (receipt %s)", out, filepath.Base(library.ReceiptPath(out)))
+	e.logf("[publish] %s (receipt %s, manifest %s)", out, filepath.Base(library.ReceiptPath(out)), filepath.Base(library.ManifestPath(out)))
 	return e.stop(run.StatusApproved, "published "+out)
 }
 
-// writeOnce installs data at path exclusively: the complete content is written to a temporary file
-// in the same directory and hard-linked into place, which fails if any entry — a file, another
+// manifestMatchesReceipt checks, before anything is installed, that the run's frozen manifest is
+// the one the receipt binds: a supported version, repository fingerprints consistent with their
+// recorded digests, and a recomputed digest equal to the receipt's manifest_digest and to the
+// stored fingerprint field. The manifest is never rebuilt from today's repositories here.
+func manifestMatchesReceipt(manifest, receipt []byte) error {
+	var rc library.Receipt
+	if err := json.Unmarshal(receipt, &rc); err != nil {
+		return fmt.Errorf("approval.json does not parse: %w", err)
+	}
+	m, err := inputs.Decode(manifest)
+	if err != nil {
+		return fmt.Errorf("manifest.json: %w", err)
+	}
+	for _, r := range m.Repos {
+		if r.ComputeFingerprint() != r.Fingerprint {
+			return fmt.Errorf("manifest.json: repository %s fingerprint is inconsistent with its recorded digests", r.ID)
+		}
+	}
+	stored := m.Fingerprint
+	if got := m.ComputeFingerprint(); got != rc.ManifestDigest || got != stored {
+		return fmt.Errorf("manifest.json does not match the approval receipt (manifest digest %.12s, receipt %.12s); the approval rests on the snapshot it was taken on", got, rc.ManifestDigest)
+	}
+	return nil
+}
+
+// withExclusion returns exclude plus path, without duplicates and without touching the original.
+func withExclusion(exclude []string, path string) []string {
+	if slices.Contains(exclude, path) {
+		return exclude
+	}
+	return append(append([]string{}, exclude...), path)
+}
+
+// writeOnce installs data at path with the public output mode; see installOnce.
+func writeOnce(path string, data []byte) error { return installOnce(path, data, 0o644) }
+
+// installOnce installs data at path exclusively: the complete content is written to a temporary
+// file in the same directory and hard-linked into place, which fails if any entry — a file, another
 // publisher's result, a symlink, even a dangling one — already exists. An existing regular file with
-// exactly data is accepted (idempotent recovery); anything else is an error (§9: never clobber).
-func writeOnce(path string, data []byte) error {
+// exactly data is accepted (idempotent recovery); anything else is an error (§9: never clobber). A
+// private mode is re-applied to an accepted existing file, so a recovered sidecar never stays wider.
+func installOnce(path string, data []byte, mode fs.FileMode) error {
 	if err := existingMatches(path, data); !errors.Is(err, fs.ErrNotExist) {
-		return err
+		if err != nil {
+			return err
+		}
+		return tighten(path, mode)
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
@@ -332,18 +386,37 @@ func writeOnce(path string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	os.Chmod(tmp.Name(), 0o644)
+	if err := os.Chmod(tmp.Name(), mode); err != nil {
+		return err
+	}
 	if err := os.Link(tmp.Name(), path); err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			if err := existingMatches(path, data); errors.Is(err, fs.ErrNotExist) {
 				return fmt.Errorf("refusing to overwrite %s: another entry appeared there", path)
-			} else {
+			} else if err != nil {
 				return err
 			}
+			return tighten(path, mode)
 		}
 		return err
 	}
 	return nil
+}
+
+// tighten narrows the permission bits of an accepted existing file to a private mode; it never
+// widens a file and leaves public outputs as they are.
+func tighten(path string, mode fs.FileMode) error {
+	if mode&0o077 != 0 {
+		return nil
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if fi.Mode().Perm()&^mode == 0 {
+		return nil
+	}
+	return os.Chmod(path, mode)
 }
 
 // existingMatches is nil if path is a regular file holding exactly data, fs.ErrNotExist if there is

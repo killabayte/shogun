@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/killabayte/shogun/internal/inputs"
 	"github.com/killabayte/shogun/internal/library"
 	"github.com/killabayte/shogun/internal/run"
 )
@@ -122,6 +123,14 @@ func TestPlanIntakeHappyPathAndStatus(t *testing.T) {
 	if _, err := os.Stat(strings.TrimSuffix(res.Path, ".md") + ".approval.json"); err != nil {
 		t.Fatalf("sidecar receipt: %v", err)
 	}
+	if fi, err := os.Stat(strings.TrimSuffix(res.Path, ".md") + ".manifest.json"); err != nil {
+		t.Fatalf("manifest sidecar: %v", err)
+	} else if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("manifest sidecar mode %v, want private", fi.Mode().Perm())
+	}
+	if code, out, errs := runCLI(t, ws, "verify", "--require-manifest", res.Path); code != ExitOK || !strings.HasPrefix(out, "valid\t") || !strings.Contains(out, "manifest sidecar") {
+		t.Fatalf("verify --require-manifest: %d %q %q", code, out, errs)
+	}
 	if code != ExitOK || !strings.Contains(out, "status:     approved") || !strings.Contains(out, "stage:      publish") {
 		t.Fatalf("status: %d %q", code, out)
 	}
@@ -202,8 +211,35 @@ func TestListAndVerify(t *testing.T) {
 	doc, _ := library.Parse([]byte(plan))
 	rc, _ := json.Marshal(library.Receipt{SchemaVersion: 1, PlanID: "p1", Revision: 1, BodySHA256: doc.BodySHA256, ImmutableMetadata: library.ImmutableMetadata(doc.Frontmatter)})
 	os.WriteFile(library.ReceiptPath(p), rc, 0o644)
-	if code, out, _ := runCLI(t, ws, "verify", p); code != 0 || !strings.HasPrefix(out, "valid") {
+	if code, out, _ := runCLI(t, ws, "verify", p); code != 0 || out != "valid\tbody and immutable metadata match the receipt\n" {
 		t.Fatalf("verify valid: %d %q", code, out)
+	}
+	// S0: the pair alone is unverifiable when the manifest is required; the receipt must carry a
+	// digest; a mismatched sidecar is `changed`; the matching triplet is valid.
+	if code, out, _ := runCLI(t, ws, "verify", "--require-manifest", p); code != 2 || !strings.HasPrefix(out, "unverifiable\tmanifest sidecar missing") {
+		t.Fatalf("require-manifest without sidecar: %d %q", code, out)
+	}
+	man := inputs.Manifest{Version: inputs.ManifestVersion}
+	man.ComputeFingerprint()
+	mb, _ := json.Marshal(man)
+	os.WriteFile(library.ManifestPath(p), mb, 0o600)
+	if code, out, _ := runCLI(t, ws, "verify", "--require-manifest", p); code != 2 || !strings.Contains(out, "no manifest digest") {
+		t.Fatalf("receipt without digest: %d %q", code, out)
+	}
+	receipt := func(d string) {
+		rc, _ := json.Marshal(library.Receipt{SchemaVersion: 1, PlanID: "p1", Revision: 1, BodySHA256: doc.BodySHA256, ImmutableMetadata: library.ImmutableMetadata(doc.Frontmatter), ManifestDigest: d})
+		os.WriteFile(library.ReceiptPath(p), rc, 0o644)
+	}
+	receipt(strings.Repeat("a", 64))
+	if code, out, _ := runCLI(t, ws, "verify", "--require-manifest", p); code != 1 || !strings.HasPrefix(out, "changed\tmanifest sidecar does not match") {
+		t.Fatalf("mismatched sidecar: %d %q", code, out)
+	}
+	receipt(man.Fingerprint)
+	if code, out, _ := runCLI(t, ws, "verify", "--require-manifest", p); code != 0 || out != "valid\tbody, immutable metadata and manifest sidecar match the receipt\n" {
+		t.Fatalf("matching triplet: %d %q", code, out)
+	}
+	if code, out, _ := runCLI(t, ws, "verify", p); code != 0 || out != "valid\tbody and immutable metadata match the receipt\n" {
+		t.Fatalf("plain verify output changed: %d %q", code, out)
 	}
 	code, out, _ = runCLI(t, ws, "list")
 	if code != ExitOK || !strings.Contains(out, "planned") || !strings.Contains(out, "valid") || !strings.Contains(out, "Demo") {

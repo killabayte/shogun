@@ -227,18 +227,23 @@ func dash(s string) string {
 
 func (a *app) cmdVerify(args []string) int {
 	fs := a.newFlagSet("verify")
+	requireManifest := fs.Bool("require-manifest", false, "also require <plan>.manifest.json to match the receipt's manifest digest")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return ExitError
 	}
 	if len(pos) != 1 {
-		return a.errorf("usage: shogun verify <plan.md>")
+		return a.errorf("usage: shogun verify [--require-manifest] <plan.md>")
 	}
 	p := pos[0]
 	if !filepath.IsAbs(p) {
 		p = filepath.Join(a.cwd, p)
 	}
-	res, note := library.Verify(p)
+	verify := library.Verify
+	if *requireManifest {
+		verify = library.VerifyWithManifest
+	}
+	res, note := verify(p)
 	fmt.Fprintf(a.stdout, "%s\t%s\n", res, note)
 	return res.ExitCode()
 }
