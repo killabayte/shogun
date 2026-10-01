@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/killabayte/shogun/internal/inputs"
 )
 
 // intLiteral matches a plain decimal integer literal (YAML allows _ separators).
@@ -385,6 +387,13 @@ func ReceiptPath(planPath string) string {
 	return strings.TrimSuffix(planPath, filepath.Ext(planPath)) + ".approval.json"
 }
 
+// ManifestPath returns <stem>.manifest.json next to a plan: the frozen input manifest of the
+// approved generation, published beside the receipt (S0). Unlike the receipt it holds local
+// paths, so it is installed with private permissions.
+func ManifestPath(planPath string) string {
+	return strings.TrimSuffix(planPath, filepath.Ext(planPath)) + ".manifest.json"
+}
+
 // Integrity is the verify outcome.
 type Integrity string
 
@@ -409,26 +418,32 @@ func (i Integrity) ExitCode() int {
 
 // Verify checks a plan file against its sidecar receipt.
 func Verify(planPath string) (Integrity, string) {
+	res, note, _ := verifyPair(planPath)
+	return res, note
+}
+
+// verifyPair is Verify plus the decoded receipt when the pair is valid.
+func verifyPair(planPath string) (Integrity, string, *Receipt) {
 	data, err := os.ReadFile(planPath)
 	if err != nil {
-		return InvalidFormat, err.Error()
+		return InvalidFormat, err.Error(), nil
 	}
 	doc, err := Parse(data)
 	if err != nil {
-		return InvalidFormat, err.Error()
+		return InvalidFormat, err.Error(), nil
 	}
 	rdata, err := os.ReadFile(ReceiptPath(planPath))
 	if err != nil {
-		return Unverifiable, "receipt missing: " + ReceiptPath(planPath)
+		return Unverifiable, "receipt missing: " + ReceiptPath(planPath), nil
 	}
 	var r Receipt
 	dec := json.NewDecoder(bytes.NewReader(rdata))
 	dec.UseNumber()
 	if err := dec.Decode(&r); err != nil || r.SchemaVersion != 1 || r.BodySHA256 == "" || r.ImmutableMetadata == nil {
-		return Unverifiable, "receipt corrupt or unsupported"
+		return Unverifiable, "receipt corrupt or unsupported", nil
 	}
 	if pid, _ := doc.Frontmatter["plan_id"].(string); r.PlanID != "" && pid != r.PlanID {
-		return Changed, fmt.Sprintf("plan_id %q does not match receipt %q", pid, r.PlanID)
+		return Changed, fmt.Sprintf("plan_id %q does not match receipt %q", pid, r.PlanID), nil
 	}
 	var reasons []string
 	if r.BodySHA256 != doc.BodySHA256 {
@@ -436,19 +451,57 @@ func Verify(planPath string) (Integrity, string) {
 	}
 	got, err := json.Marshal(ImmutableMetadata(doc.Frontmatter))
 	if err != nil {
-		return Unverifiable, "cannot canonicalize frontmatter: " + err.Error()
+		return Unverifiable, "cannot canonicalize frontmatter: " + err.Error(), nil
 	}
 	want, err := json.Marshal(r.ImmutableMetadata) // stored canonical form, compared as-is
 	if err != nil {
-		return Unverifiable, "cannot read receipt metadata: " + err.Error()
+		return Unverifiable, "cannot read receipt metadata: " + err.Error(), nil
 	}
 	if !bytes.Equal(got, want) {
 		reasons = append(reasons, "immutable metadata changed")
 	}
 	if len(reasons) > 0 {
-		return Changed, strings.Join(reasons, "; ")
+		return Changed, strings.Join(reasons, "; "), nil
 	}
-	return Valid, "body and immutable metadata match the receipt"
+	return Valid, "body and immutable metadata match the receipt", &r
+}
+
+// VerifyWithManifest is Verify plus the manifest sidecar (S0): <stem>.manifest.json must be
+// present, decodable, of a supported version and internally consistent, and its recomputed
+// fingerprint must equal the receipt's manifest digest. A valid pair without the sidecar is
+// unverifiable here, while plain Verify keeps accepting it; the sidecar pins the planning base,
+// not the approval itself.
+func VerifyWithManifest(planPath string) (Integrity, string) {
+	res, note, r := verifyPair(planPath)
+	if res != Valid {
+		return res, note
+	}
+	mp := ManifestPath(planPath)
+	data, err := os.ReadFile(mp)
+	if err != nil {
+		return Unverifiable, "manifest sidecar missing: " + mp
+	}
+	m, err := inputs.Decode(data)
+	if err != nil {
+		return Unverifiable, "manifest sidecar corrupt or unsupported: " + err.Error()
+	}
+	if r.ManifestDigest == "" {
+		return Unverifiable, "receipt carries no manifest digest"
+	}
+	for _, repo := range m.Repos {
+		if repo.ComputeFingerprint() != repo.Fingerprint {
+			return Changed, "manifest sidecar repository " + repo.ID + " fingerprint is inconsistent with its recorded digests"
+		}
+	}
+	stored := m.Fingerprint
+	got := m.ComputeFingerprint()
+	if got != r.ManifestDigest {
+		return Changed, "manifest sidecar does not match the receipt's manifest digest"
+	}
+	if stored != got {
+		return Changed, "manifest sidecar fingerprint field is inconsistent with its contents"
+	}
+	return Valid, "body, immutable metadata and manifest sidecar match the receipt"
 }
 
 // Entry is one row of `shogun list`.
@@ -463,7 +516,8 @@ type Entry struct {
 	Note      string
 }
 
-// List scans dir recursively for *.md plans (ignoring *.approval.json) and returns sorted entries.
+// List scans dir recursively for *.md plans (ignoring the *.approval.json and *.manifest.json
+// sidecars) and returns sorted entries.
 func List(dir string) ([]Entry, error) {
 	var out []Entry
 	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {

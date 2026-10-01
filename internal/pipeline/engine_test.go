@@ -227,13 +227,19 @@ func newFixture(t *testing.T, planner, reviewer []reply) *fixture {
 	f := &fixture{planner: &script{t: t, name: "planner", replies: planner}, reviewer: &script{t: t, name: "reviewer", replies: reviewer}}
 	st.Mode = ModeThorough // these tests exercise the staged pipeline; fast_test.go covers the default
 	st.Publish.Path = filepath.Join(ws, "docs", "plans", "20260926-000000-test-abcd.md")
-	exclude := []string{st.Publish.Path, library.ReceiptPath(st.Publish.Path)}
+	exclude := []string{st.Publish.Path, library.ReceiptPath(st.Publish.Path), library.ManifestPath(st.Publish.Path)}
 	repo, err := inputs.RepoManifest(context.Background(), "repo-1", ws, exclude...)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// As at intake: the manifest is saved in the run dir, and publication installs those bytes.
+	man := &inputs.Manifest{Version: inputs.ManifestVersion, Workspace: ws, Repos: []inputs.Repo{repo}, Exclude: exclude}
+	man.ComputeFingerprint()
+	if err := man.Save(filepath.Join(r.Dir, "manifest.json")); err != nil {
+		t.Fatal(err)
+	}
 	f.e = &Engine{Run: r, State: st, Task: "Add a --version flag", Cfg: cfg, Planner: f.planner, Reviewer: f.reviewer,
-		Manifest: &inputs.Manifest{Repos: []inputs.Repo{repo}, Exclude: exclude}, Log: &f.log, Now: time.Now, Project: "test",
+		Manifest: man, Log: &f.log, Now: time.Now, Project: "test",
 		Fetch: func(ctx context.Context, dir string, urls []string) ([]inputs.Source, error) { return nil, nil }}
 	return f
 }

@@ -192,3 +192,26 @@ func TestListScansPlansAndSkipsForeignMarkdown(t *testing.T) {
 		t.Fatalf("broken plan must be listed as invalid_format: %+v", brokenE)
 	}
 }
+
+// S0: the manifest sidecar sits next to the receipt and never shows up as a plan.
+func TestManifestPathAndListIgnoresSidecars(t *testing.T) {
+	if got := ManifestPath("/x/docs/plans/feature.md"); got != "/x/docs/plans/feature.manifest.json" {
+		t.Fatalf("ManifestPath: %s", got)
+	}
+	dir := t.TempDir()
+	plan := "---\ntitle: Demo\nplan_id: p1\nrevision: 1\ncreated: 2026-09-23\nstatus: planned\nproject: demo\n---\n<!-- shogun:plan:begin -->\nbody\n<!-- shogun:plan:end -->\n"
+	p := filepath.Join(dir, "p1.md")
+	os.WriteFile(p, []byte(plan), 0o644)
+	doc, err := Parse([]byte(plan))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc, _ := json.Marshal(Receipt{SchemaVersion: 1, PlanID: "p1", Revision: 1, BodySHA256: doc.BodySHA256, ImmutableMetadata: ImmutableMetadata(doc.Frontmatter)})
+	os.WriteFile(ReceiptPath(p), rc, 0o644)
+	os.WriteFile(ManifestPath(p), []byte("{\"version\": 1}\n"), 0o600)
+	os.WriteFile(filepath.Join(dir, "stray.manifest.json"), []byte("{}\n"), 0o600)
+	entries, err := List(dir)
+	if err != nil || len(entries) != 1 || entries[0].Path != p || entries[0].Integrity != Valid {
+		t.Fatalf("List: %v %+v", err, entries)
+	}
+}

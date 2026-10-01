@@ -103,7 +103,8 @@ func (a *app) cmdResume(args []string) int {
 		fmt.Fprintf(a.stderr, "[resume] new generation %d: repositories re-snapshotted, planning starts again at %s; spend so far is kept\n", st.Generation, st.Cursor.Stage)
 	} else if man, err := inputs.Load(filepath.Join(dir, "manifest.json")); err == nil {
 		// §9: changed repositories need an explicit new generation; approvals are never inherited.
-		if drift, err := inputs.CheckDrift(pctx, man); errors.Is(err, inputs.ErrDrift) {
+		// The run's own outputs, including a sidecar left by an interrupted publication, are not drift.
+		if drift, err := inputs.CheckDrift(pctx, pipeline.DriftManifest(man, st.Publish.Path)); errors.Is(err, inputs.ErrDrift) {
 			return a.errorf("inputs changed since the snapshot (%s): run `shogun resume %s --refresh` for a new generation", strings.Join(drift, ", "), st.RunID)
 		}
 	}
@@ -227,18 +228,23 @@ func dash(s string) string {
 
 func (a *app) cmdVerify(args []string) int {
 	fs := a.newFlagSet("verify")
+	requireManifest := fs.Bool("require-manifest", false, "also require <plan>.manifest.json to match the receipt's manifest digest")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return ExitError
 	}
 	if len(pos) != 1 {
-		return a.errorf("usage: shogun verify <plan.md>")
+		return a.errorf("usage: shogun verify [--require-manifest] <plan.md>")
 	}
 	p := pos[0]
 	if !filepath.IsAbs(p) {
 		p = filepath.Join(a.cwd, p)
 	}
-	res, note := library.Verify(p)
+	verify := library.Verify
+	if *requireManifest {
+		verify = library.VerifyWithManifest
+	}
+	res, note := verify(p)
 	fmt.Fprintf(a.stdout, "%s\t%s\n", res, note)
 	return res.ExitCode()
 }

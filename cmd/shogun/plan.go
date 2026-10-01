@@ -119,7 +119,7 @@ func (a *app) cmdPlan(args []string) int {
 	}
 	st.Publish.Path = outputPath(*out, cfg, a.cwd, id)
 	man := &inputs.Manifest{Version: inputs.ManifestVersion, CreatedAt: now.UTC().Format(time.RFC3339), Workspace: a.cwd,
-		Exclude: []string{st.Publish.Path, library.ReceiptPath(st.Publish.Path)}}
+		Exclude: []string{st.Publish.Path, library.ReceiptPath(st.Publish.Path), library.ManifestPath(st.Publish.Path)}}
 	for i, root := range repos {
 		rp, err := inputs.RepoManifest(ictx, fmt.Sprintf("repo-%d", i+1), root, man.Exclude...)
 		if ictx.Err() != nil {
