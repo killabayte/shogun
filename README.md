@@ -185,8 +185,8 @@ title: Add a --version flag that prints the version and exits
 plan_id: 20260926-100000-version-flag-a1b2
 revision: 1
 status: planned            # planned | in_progress | blocked | done | dropped
-planner: claude/opus:high
-reviewer: codex/gpt-6-astra:high
+planner: claude/fable:xhigh
+reviewer: codex/gpt-6-astra:xhigh
 …
 ---
 
@@ -226,7 +226,7 @@ keeps accepting a plan/receipt pair published before this file existed.
 ## Models
 
 The planner is `claude/<model>:<effort>` and the reviewer is `codex/<model>:<effort>`. The defaults are
-`claude/opus:high` and `codex/gpt-6-astra:high`; the reviewer's effort is never below `high`. Model ids are
+`claude/fable:xhigh` and `codex/gpt-6-astra:xhigh`; the reviewer's effort is never below `high`. Model ids are
 opaque strings, so a new model needs no new shogun release.
 
 Set them in the config, or per run, and certify the pair you use:
@@ -265,7 +265,7 @@ over both.
 
 | key | default | meaning |
 |---|---|---|
-| `planner`, `reviewer` | `claude/opus:high`, `codex/gpt-6-astra:high` | the model pair |
+| `planner`, `reviewer` | `claude/fable:xhigh`, `codex/gpt-6-astra:xhigh` | the model pair |
 | `claude_command`, `codex_command` | `claude`, `codex` | executables, when not on `PATH` |
 | `plans_dir` | none (plans go to `docs/plans/`) | the plan library |
 | `project`, `lang` | workspace name, the task's language | library folder and plan language |
