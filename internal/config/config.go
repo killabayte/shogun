@@ -84,8 +84,8 @@ type fileConfig struct {
 
 // Default returns the built-in defaults.
 func Default() Config {
-	planner, _ := ParseModelSpec("claude/opus:high") // user decision 2026-09-27: cheaper, keeps the Fable weekly quota
-	reviewer, _ := ParseModelSpec("codex/gpt-6-astra:high")
+	planner, _ := ParseModelSpec("claude/fable:xhigh")       // user decision 2026-10-03: Fable plans at xhigh
+	reviewer, _ := ParseModelSpec("codex/gpt-6-astra:xhigh") // and GPT-6-Astra reviews at xhigh
 	return Config{
 		Planner: planner, Reviewer: reviewer,
 		ClaudeCommand: "claude", CodexCommand: "codex",

@@ -103,7 +103,7 @@ func TestDefaultsOnlyWhenNoFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(l.Files) != 0 || l.Config.Planner.String() != "claude/opus:high" || l.Config.Reviewer.String() != "codex/gpt-6-astra:high" {
+	if len(l.Files) != 0 || l.Config.Planner.String() != "claude/fable:xhigh" || l.Config.Reviewer.String() != "codex/gpt-6-astra:xhigh" {
 		t.Fatalf("defaults wrong: %+v", l.Config)
 	}
 }
